@@ -202,7 +202,7 @@ class VolumeSpiller:
         if not cleanup: 
             self._active_temp_dirs.append(temp_dir)
 
-        # AUTO-FIX APPLIED HERE
+        # Timestamp fix applies here
         df = self._fix_ns_precision(df)
 
         # Use collect_schema to get schema for both DataFrame and LazyFrame
