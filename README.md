@@ -34,7 +34,7 @@ Install it:
 %pip install git+https://github.com/spookytomtom/databricks-scaffold.git
 ~~~
 
-## 1. The "Polars Sandwich" (Spark ➡ Polars ➡ Spark)
+## 1. 🥪The "Polars Sandwich" (Spark ➡ Polars ➡ Spark)
 The most common use case: taking a distributed Spark DataFrame, bringing it to the driver as Polars for fast single-node processing, and sending it back.
 ~~~
 from databricks_scaffold import VolumeSpiller
@@ -77,7 +77,7 @@ spill.save_checkpoint_spark(spark_df, name="raw_spark_backup")
 print(spill.list_checkpoints(storage="volume"))
 # Output: ['raw_spark_backup', 'step_1_cleaned']
 ~~~
-### Saving to Local Driver (Ephemeral)
+### ⚡Saving to Local Driver (Ephemeral)
 Faster IO, but data is lost when the cluster restarts. Great for temporary caching during a notebook session.
 ~~~
 # Save to /tmp on the driver
@@ -86,7 +86,7 @@ spill.save_checkpoint_pl(pl_df, name="temp_cache", storage="local")
 # Load it back
 df_cached = spill.load_checkpoint_pl(name="temp_cache", storage="local")
 ~~~
-## 3. Lazy Execution (Streaming)
+## 3. 💤Lazy Execution (Streaming)
 If your data is too large to fit entirely in RAM, use Polars LazyFrames. VolumeSpiller supports this natively.
 ~~~
 # 1. Convert Spark to Polars LazyFrame (eager=False)
@@ -100,7 +100,7 @@ q = lazy_pl.filter(pl.col("value") > 100).select("id", "value")
 # You can sink directly back to a checkpoint without ever materializing in RAM
 spill.save_checkpoint_pl(q, name="processed_lazy", storage="volume")
 ~~~
-## 4. Automatic Timestamp Fixes
+## 4. 🕝Automatic Timestamp Fixes
 Spark uses Microseconds (us); Polars defaults to Nanoseconds (ns). Usually, this causes crashes when moving data. `VolumeSpiller` handles this silently.
 ~~~
 # If your Polars DF has ns timestamps:
@@ -110,7 +110,7 @@ Spark uses Microseconds (us); Polars defaults to Nanoseconds (ns). Usually, this
 # before writing to Parquet, preventing Spark read errors.
 spark_df = spill.polars_to_spark(pl_df)
 ~~~
-## 5. Dev vs. Prod Mode
+## 5. 🛠️Dev vs. 🚀Prod Mode
 The is_dev flag controls how the Volume is treated during initialization and teardown.
  - is_dev=True: Creates volume if missing. teardown() preserves files for debugging.
  - is_dev=False: Drops and recreates volume on init (clean slate). teardown() destroys the volume.
