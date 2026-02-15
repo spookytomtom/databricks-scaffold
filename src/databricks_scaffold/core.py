@@ -10,7 +10,7 @@ from pathlib import Path
 
 class VolumeSpiller:
     def __init__(self, spark: SparkSession, catalog: str, schema: str, volume_name: str, is_dev: bool = False):
-        self.spark = spark
+        self.spark = spark if spark else SparkSession.builder.getOrCreate()
         self.is_dev = is_dev
         self.full_name = f"{catalog}.{schema}.{volume_name}"
         self.volume_root = f"/Volumes/{catalog}/{schema}/{volume_name}"

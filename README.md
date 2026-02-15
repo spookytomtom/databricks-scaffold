@@ -27,3 +27,34 @@ One workaround is to load the data in batches, which is even slower.
 
 # Something else that works, but...
 Polars [scan_delta](https://docs.pola.rs/api/python/stable/reference/api/polars.scan_delta.html)() works, but you need credentials and you can't yet write so not 100% solved process.
+
+# Usage
+
+Install it:
+~~~
+%pip install git+https://github.com/spookytomtom/databricks-scaffold.git
+~~~
+
+~~~
+from databricks_scaffold import VolumeSpiller
+
+# Initialize (catalog.schema.volume)
+spiller = VolumeSpiller(
+    catalog="main", 
+    schema="default", 
+    volume_name="temp_spill", 
+    is_dev=True
+)
+
+# Convert Spark to Polars (spills to volume transparently)
+pl_df = spiller.spark_to_polars(spark_df)
+
+# Do Polars work...
+pl_df = pl_df.group_by("col").count()
+
+# Convert back to Spark
+final_spark_df = spiller.polars_to_spark(pl_df)
+~~~
+
+
+

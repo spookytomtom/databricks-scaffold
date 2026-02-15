@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "databricks-scaffold"
+version = "0.1.1"
+description = "Productivity booster functions for switching between PySpark and Polars on Databricks."
+readme = "README.md"
+requires-python = ">=3.9"
+license = {file = "LICENSE"}
+authors = [
+  {name = "Your Name", email = "your.email@example.com"}
+]
+keywords = ["databricks", "polars", "pyspark", "etl", "productivity"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+]
+
+# Dependencies that will be installed automatically
+dependencies = [
+  "polars>=1.38.1",
+  "pyspark>=3.4.0",
+]
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov",
+]
+
+[project.urls]
+Repository = "https://github.com/spookytomtom/databricks-scaffold"
+
+# If you followed the recommendation to put code in src/databricks_scaffold:
+[tool.setuptools]
+packages = ["databricks_scaffold"]
+package-dir = {"" = "src"}
