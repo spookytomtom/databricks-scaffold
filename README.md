@@ -4,13 +4,13 @@ Productivity booster functions for using polars on Databricks. Ease the pain of 
 Helps the process of switching back and forth between PySpark Dataframe and polars Dataframe and _more_.
 
 Features:
-- VolumeSpiller: 
+- Volumespill: 
   - Utilize Unity Catalog Volume as a spillage bucket making the switch between pyspark and polars faster or just to save checkpoint parquet files.
   - Utilize the driver node file system as a temporary scan / sink storage for polars.
 - adds utility functions missing from pyspark, such as 
-  - glimpse(), 
+  - glimpse() - soon, 
   - keep_duplicates(), 
-  - shape(), 
+  - frame_shape(), 
   - clean_column_names() 
   - etc.
 
@@ -29,17 +29,16 @@ One workaround is to load the data in batches, which is even slower.
 Polars [scan_delta](https://docs.pola.rs/api/python/stable/reference/api/polars.scan_delta.html)() works, but you need credentials and you can't yet write so not 100% solved process.
 
 # Usage
-
 Install it:
 ~~~
 %pip install git+https://github.com/spookytomtom/databricks-scaffold.git
 ~~~
 
+## Quickstart
 ~~~
 from databricks_scaffold import VolumeSpiller
 
-# Initialize (catalog.schema.volume)
-spiller = VolumeSpiller(
+spill = VolumeSpiller(
     catalog="main", 
     schema="default", 
     volume_name="temp_spill", 
@@ -47,14 +46,77 @@ spiller = VolumeSpiller(
 )
 
 # Convert Spark to Polars (spills to volume transparently)
-pl_df = spiller.spark_to_polars(spark_df)
+pl_df = spill.spark_to_polars(spark_df)
 
 # Do Polars work...
 pl_df = pl_df.group_by("col").count()
 
 # Convert back to Spark
-final_spark_df = spiller.polars_to_spark(pl_df)
+final_spark_df = spill.polars_to_spark(pl_df)
 ~~~
 
+## In a .py
+Avoid leaving any volume behind using `try` `finally`
+~~~
+from databricks_scaffold import VolumeSpiller
 
+try:
+    spill = VolumeSpiller(
+        catalog="main", 
+        schema="default", 
+        volume_name="temp_spill", 
+        is_dev=True
+    )
+
+    # Convert Spark to Polars (spills to volume transparently)
+    pl_df = spill.spark_to_polars(spark_df)
+
+    # Do Polars work...
+    pl_df = pl_df.group_by("col").count()
+
+    # Convert back to Spark
+    final_spark_df = spill.polars_to_spark(pl_df)
+
+finally:
+    spill.teardown()
+~~~
+## In a .ipynb
+~~~
+from databricks_scaffold import VolumeSpiller
+import atexit
+
+# Create function call at exit to remove volume no matter what
+def cleanup_at_exit():
+    """This function is the 'last man standing'."""
+    try:
+        if 'spiller' in globals() and not spill.is_dev:
+            print("atexit: Cleaning up Unity Catalog Volume...")
+            spill.teardown()
+    except Exception as e:
+        print(f"atexit cleanup failed: {e}")
+
+atexit.register(cleanup_at_exit)
+
+spill = VolumeSpiller(
+    catalog="main", 
+    schema="default", 
+    volume_name="temp_spill", 
+    is_dev=True
+)
+
+# Cell 1
+# Convert Spark to Polars (spills to volume transparently)
+pl_df = spill.spark_to_polars(spark_df)
+
+# Cell 2
+# Do Polars work...
+pl_df = pl_df.group_by("col").count()
+
+# Cell 3
+# Convert back to Spark
+final_spark_df = spill.polars_to_spark(pl_df)
+
+# Cell 4
+spill.teardown()
+~~~
 
