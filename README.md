@@ -12,7 +12,7 @@ Features:
   - keep_duplicates(), 
   - frame_shape(), 
   - clean_column_names(),
-  - column_comment() - soon,
+  - apply_column_comments(),
   - etc.
 
 # Something that works, but...
