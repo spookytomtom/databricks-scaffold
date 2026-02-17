@@ -11,7 +11,8 @@ Features:
   - glimpse() - soon, 
   - keep_duplicates(), 
   - frame_shape(), 
-  - clean_column_names() 
+  - clean_column_names(),
+  - column_comment() - soon,
   - etc.
 
 # Something that works, but...
@@ -124,31 +125,4 @@ try:
 finally:
     # ensuring the volume is dropped to save costs/storage
     spill.teardown()
-~~~
-OR
-~~~
-# PRODUCTION PATTERN .ipynb
-# Cell 1
-from databricks_scaffold import VolumeSpiller
-import atexit
-
-# Create function call at exit to remove volume no matter what
-def cleanup_at_exit():
-    """This function is the 'last man standing'."""
-    try:
-        if 'spiller' in globals() and not spill.is_dev:
-            print("atexit: Cleaning up Unity Catalog Volume...")
-            spill.teardown()
-    except Exception as e:
-        print(f"atexit cleanup failed: {e}")
-
-atexit.register(cleanup_at_exit)
-
-spill = VolumeSpiller(..., is_dev=False)
-
-# Cell 2
-# ... logic ...
-
-# Cell 3
-spill.teardown()
 ~~~
