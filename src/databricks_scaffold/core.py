@@ -102,15 +102,6 @@ class VolumeSpiller:
         base_path, resolved_storage = self._resolve_path(name, storage)
         target_path = f"{base_path}/data.parquet"
 
-        # Validate datetime precision
-        schema = df.collect_schema() if isinstance(df, pl.LazyFrame) else df.schema
-        ns_cols = [col for col, dtype in schema.items() if dtype == pl.Datetime("ns")]
-        if ns_cols:
-            raise RuntimeError(
-                f"❌ The following columns have datetime in nanosecond precision (ns): {ns_cols}. "
-                "Cast to millisecond precision (ms) before saving."
-            )
-
         if isinstance(df, pl.LazyFrame):
             df.sink_parquet(target_path, compression=compression, engine="streaming")
         else:
@@ -135,7 +126,7 @@ class VolumeSpiller:
 
         return pl.read_parquet(glob_path) if eager else pl.scan_parquet(glob_path)
 
-    def save_checkpoint_spark(self, df: SparkDataFrame, name: str, optimize_files: bool = True):
+    def save_checkpoint_spark(self, df: SparkDataFrame, name: str, optimize_files: bool = False):
         """
         Saves a Spark DataFrame as a named checkpoint (directory).
         """
@@ -172,7 +163,7 @@ class VolumeSpiller:
             self.spark.sql(f"DROP VOLUME IF EXISTS {self.full_name}")
             print(f"🗑️ PROD MODE: Volume {self.full_name} dropped.")
 
-    def spark_to_polars(self, df: SparkDataFrame, cleanup: bool = False, eager: bool = True, optimize_files: bool = True) -> pl.DataFrame | pl.LazyFrame:
+    def spark_to_polars(self, df: SparkDataFrame, cleanup: bool = False, eager: bool = True, optimize_files: bool = False) -> pl.DataFrame | pl.LazyFrame:
         run_id = uuid.uuid4().hex
         temp_dir = self.get_path(f"spill_sp_pl_{run_id}")
         
@@ -207,14 +198,6 @@ class VolumeSpiller:
 
         # Use collect_schema to get schema for both DataFrame and LazyFrame
         schema = df.collect_schema() if isinstance(df, pl.LazyFrame) else df.schema
-
-        # Find problematic datetime columns
-        ns_cols = [col for col, dtype in schema.items() if dtype == pl.Datetime("ns")]
-        if ns_cols:
-            raise RuntimeError(
-                f"❌ The following columns have datetime in nanosecond precision (ns): {ns_cols}. "
-                "Please cast them to millisecond precision (ms) before calling polars_to_spark."
-            )
 
         try:
             # Ensure the directory exists
