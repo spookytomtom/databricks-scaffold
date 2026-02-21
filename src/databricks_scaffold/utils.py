@@ -46,6 +46,63 @@ def keep_duplicates(df: SparkDataFrame, subset: list[str] | str) -> SparkDataFra
         .drop("_dupe_count")
     )
 
+def glimpse(df: SparkDataFrame, n: int = 5, truncate: int = 75) -> None:
+    """
+    Prints a concise summary of a Spark DataFrame, similar to R's dplyr::glimpse 
+    or Polars' .glimpse(). Shows the number of rows and columns, followed by 
+    column names, data types, and the first few values.
+    
+    Note: This triggers a spark job to count rows and fetch the top `n` records.
+
+    Parameters
+    ----------
+    df : SparkDataFrame
+        The PySpark DataFrame to glimpse.
+    n : int, optional
+        Number of rows to preview (default is 5).
+    truncate : int, optional
+        Maximum length of the string representation for the preview values (default is 75).
+    """
+    # 1. Get shape (triggers a Spark job)
+    rows = df.count()
+    cols = len(df.columns)
+    
+    print(f"Rows: {rows}")
+    print(f"Columns: {cols}")
+    
+    if rows == 0 or cols == 0:
+        return
+    
+    # 2. Fetch the first n rows to the driver
+    head_rows = df.take(n)
+    dtypes = dict(df.dtypes)
+    
+    # 3. Calculate max lengths for nice visual alignment
+    max_col_len = max([len(c) for c in df.columns])
+    max_type_len = max([len(t) for _, t in df.dtypes])
+    
+    # 4. Print the aligned schema and data preview
+    for col_name in df.columns:
+        dtype = dtypes[col_name]
+        
+        # Extract and stringify values for this column
+        # Replace None with "null" for clearer visual representation
+        vals = [
+            "null" if getattr(row, col_name) is None else str(getattr(row, col_name)) 
+            for row in head_rows
+        ]
+        vals_str = ", ".join(vals)
+        
+        # Truncate if the preview string gets too long
+        if len(vals_str) > truncate:
+            vals_str = vals_str[:truncate] + "..."
+            
+        # Formatting: $ col_name <type> values
+        aligned_col = col_name.ljust(max_col_len)
+        aligned_type = f"<{dtype}>".ljust(max_type_len + 2) # +2 for the angle brackets
+        
+        print(f"$ {aligned_col} {aligned_type} {vals_str}")
+
 def apply_column_comments(
     spark: SparkSession,
     table_name: str,
