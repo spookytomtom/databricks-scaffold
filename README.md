@@ -8,7 +8,7 @@ Features:
   - Utilize Unity Catalog Volume as a spillage bucket making the switch between pyspark and polars faster or just to save checkpoint parquet files.
   - Utilize the driver node file system as a temporary scan / sink storage for polars.
 - adds utility functions missing from pyspark, such as 
-  - glimpse() - soon, 
+  - glimpse(), 
   - keep_duplicates(), 
   - frame_shape(), 
   - clean_column_names(),
