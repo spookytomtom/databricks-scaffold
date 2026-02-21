@@ -99,7 +99,7 @@ class VolumeSpiller:
         df: pl.DataFrame | pl.LazyFrame,
         name: str,
         storage: str = "volume",
-        compression: str = "zstd"
+        compression: str = "auto"
     ):
         """
         Saves a Polars checkpoint either to UC Volume or driver-local /tmp.
@@ -107,9 +107,12 @@ class VolumeSpiller:
         storage:
             "volume" (default)
             "local"
+        compression:
+            "auto" (routes to zstd for volume, snappy for local)
+            "zstd", "snappy", "uncompressed", etc.
         """
 
-        # AUTO-FIX APPLIED HERE
+        # AUTO-FIX TIMESTAMPS
         df = self._prepare_polars_timestamps(df)
 
         if not isinstance(df, (pl.DataFrame, pl.LazyFrame)):
@@ -121,13 +124,17 @@ class VolumeSpiller:
         base_path, resolved_storage = self._resolve_path(name, storage)
         target_path = f"{base_path}/data.parquet"
 
+        # AUTO-ROUTE COMPRESSION
+        if compression == "auto":
+            compression = "zstd" if resolved_storage == "volume" else "snappy"
+
         if isinstance(df, pl.LazyFrame):
             df.sink_parquet(target_path, compression=compression, engine="streaming")
         else:
             df.write_parquet(target_path, compression=compression)
 
         prefix = "⚡ Local" if resolved_storage == "local" else "✅ Volume"
-        print(f"{prefix} checkpoint '{name}' written.")
+        print(f"{prefix} checkpoint '{name}' written using {compression} compression.")
 
     def load_checkpoint_pl(
         self,
@@ -162,8 +169,10 @@ class VolumeSpiller:
 
         if optimize_files:
             df = df.coalesce(2)
+            
+        # Hardcoding zstd since this explicitly saves to the Volume
         df.write.mode("overwrite").option("compression", "zstd").parquet(checkpoint_dir)
-        print(f"✅ Spark checkpoint '{name}' written to UC Volume.")
+        print(f"✅ Spark checkpoint '{name}' written to UC Volume using zstd compression.")
 
     def load_checkpoint_spark(self, name: str) -> SparkDataFrame:
         """
@@ -193,6 +202,7 @@ class VolumeSpiller:
             if optimize_files:
                 df = df.coalesce(2) 
 
+            # Hardcoding zstd since temp_dir routes to the Volume
             df.write.mode("overwrite").option("compression", "zstd").parquet(temp_dir)
             glob_path = f"{temp_dir}/*.parquet"
             
@@ -216,10 +226,10 @@ class VolumeSpiller:
         df = self._prepare_polars_timestamps(df)
 
         try:
-            # Ensure the directory exists
             os.makedirs(temp_dir, exist_ok=True)
             file_path = f"{temp_dir}/part-0.parquet"
             
+            # Hardcoding zstd since temp_dir routes to the Volume
             if isinstance(df, pl.LazyFrame):
                 df.sink_parquet(file_path, compression="zstd")
             else:
