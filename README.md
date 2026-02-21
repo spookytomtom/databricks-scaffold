@@ -104,11 +104,12 @@ spill.save_checkpoint_pl(q, name="processed_lazy", storage="volume")
 ## 4. 🕝Automatic Timestamp Fixes
 Spark uses Microseconds (us); Polars defaults to Nanoseconds (ns). Usually, this causes crashes when moving data. `VolumeSpiller` handles this silently.
 ~~~
-# If your Polars DF has ns timestamps:
+# If your Polars DF has ns/us timestamps:
 # pl_df = pl.DataFrame({"time": [datetime.now()]}) # default is ns
 
-# This method detects 'ns' columns and casts them to 'ms' automatically
+# This method detects 'ns' and 'us' columns and casts them to 'ms' automatically
 # before writing to Parquet, preventing Spark read errors.
+# If no timezone is assinged, UTC will be added automatically.
 spark_df = spill.polars_to_spark(pl_df)
 ~~~
 ## 5. 🛠️Dev vs. 🚀Prod Mode

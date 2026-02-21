@@ -44,14 +44,33 @@ class VolumeSpiller:
         os.makedirs(path, exist_ok=True)
         return path, storage
     
-    def _fix_ns_precision(self, df: pl.DataFrame | pl.LazyFrame) -> pl.DataFrame | pl.LazyFrame:
-        """Internal helper to automatically cast ns timestamps to ms."""
+    def _prepare_polars_timestamps(self, df: pl.DataFrame | pl.LazyFrame) -> pl.DataFrame | pl.LazyFrame:
+        """Internal helper to fix ns/us precision and attach UTC timezone for Spark compatibility."""
         schema = df.collect_schema() if isinstance(df, pl.LazyFrame) else df.schema
-        ns_cols = [col for col, dtype in schema.items() if dtype == pl.Datetime("ns")]
         
-        if ns_cols:
-            print(f"⏰ Auto-fix: Casting {ns_cols} from nanoseconds (ns) to milliseconds (ms) for Spark/Parquet compatibility.")
-            return df.with_columns([pl.col(c).dt.cast_time_unit("ms") for c in ns_cols])
+        exprs = []
+        for col_name, dtype in schema.items():
+            if isinstance(dtype, pl.Datetime):
+                expr = pl.col(col_name)
+                modified = False
+                
+                # 1. Fix precision: Convert both nanoseconds and microseconds to milliseconds
+                if dtype.time_unit in ("ns", "us"):
+                    expr = expr.dt.cast_time_unit("ms")
+                    modified = True
+                    print(f"⏰ Auto-fix: Casting '{col_name}' from {dtype.time_unit} to ms.")
+                
+                # 2. Fix timezone: Add UTC to prevent timestamp_ntz in Spark
+                if dtype.time_zone is None:
+                    expr = expr.dt.replace_time_zone("UTC")
+                    modified = True
+                    print(f"🌍 Auto-fix: Adding UTC timezone to '{col_name}' to avoid timestamp_ntz.")
+                    
+                if modified:
+                    exprs.append(expr)
+                    
+        if exprs:
+            return df.with_columns(exprs)
         return df
 
     def list_checkpoints(self, storage: str = "volume") -> list[str]:
@@ -91,7 +110,7 @@ class VolumeSpiller:
         """
 
         # AUTO-FIX APPLIED HERE
-        df = self._fix_ns_precision(df)
+        df = self._prepare_polars_timestamps(df)
 
         if not isinstance(df, (pl.DataFrame, pl.LazyFrame)):
             raise TypeError(f"df must be pl.DataFrame or pl.LazyFrame, got {type(df).__name__}")
@@ -194,10 +213,7 @@ class VolumeSpiller:
             self._active_temp_dirs.append(temp_dir)
 
         # Timestamp fix applies here
-        df = self._fix_ns_precision(df)
-
-        # Use collect_schema to get schema for both DataFrame and LazyFrame
-        schema = df.collect_schema() if isinstance(df, pl.LazyFrame) else df.schema
+        df = self._prepare_polars_timestamps(df)
 
         try:
             # Ensure the directory exists
