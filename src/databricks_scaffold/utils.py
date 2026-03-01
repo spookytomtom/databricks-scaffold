@@ -1,11 +1,164 @@
 import re
 from pyspark.sql import DataFrame as SparkDataFrame, functions as F, Window, SparkSession
+from pyspark.sql.types import StructType, StructField, StringType, LongType, DoubleType, BooleanType
 from typing import Dict 
+import polars as pl
+
+class DataProfiler:
+    """
+    A utility class for generating summary profiles of Polars and PySpark DataFrames, 
+    including missing values, unique counts, and top frequent values.
+    """
+    def __init__(self, top_n_freq=3):
+        """
+        Initializes the DataProfiler.
+
+        Args:
+            top_n_freq (int, optional): Number of most frequent values to track per column. 
+                                        Defaults to 3.
+        """
+        self.top_n = top_n_freq
+
+    def profile(self, df, output="print") -> pl.DataFrame | SparkDataFrame | None:
+        """
+        Routes the DataFrame to the correct profiling engine based on its type.
+
+        Args:
+            df (pl.DataFrame | SparkDataFrame): The Polars or PySpark DataFrame to profile.
+            output (str, optional): The output format. 'print' prints to console, 'dataframe' 
+                                    returns a summary DataFrame. Defaults to "print".
+
+        Returns:
+            pl.DataFrame | SparkDataFrame | None: A summary DataFrame if output is 'dataframe', 
+                                                  otherwise None.
+
+        Raises:
+            ValueError: If the input DataFrame type is not supported.
+        """
+        df_type = str(type(df)).lower()
+        
+        if "polars" in df_type:
+            return self._profile_polars(df, output)
+        elif "pyspark" in df_type:
+            return self._profile_pyspark(df, output)
+        else:
+            raise ValueError(f"Unsupported type: {type(df)}. Please pass Polars or PySpark.")
+
+    def _profile_polars(self, df, output) -> pl.DataFrame | None:
+        """
+        Internal method to profile a Polars DataFrame.
+
+        Args:
+            df (pl.DataFrame): The Polars DataFrame to profile.
+            output (str): The desired output format ('print' or 'dataframe').
+
+        Returns:
+            pl.DataFrame | None: A Polars DataFrame containing the profile if output='dataframe'.
+        """
+        total_rows = df.height
+        results = []
+
+        if output == "print":
+            print(f"=== POLARS DATAFRAME PROFILE ===")
+            print(f"Shape: {total_rows} rows, {df.width} columns\n" + "=" * 40)
+
+        for col_name, dtype in df.schema.items():
+            # Gather metrics
+            null_count = df[col_name].null_count()
+            null_pct = round((null_count / total_rows * 100), 2) if total_rows > 0 else 0
+            n_unique = df[col_name].n_unique()
+            is_unique = (n_unique == total_rows)
+            
+            counts = df[col_name].value_counts().sort("count", descending=True).head(self.top_n)
+            freq_vals = [f"{row[col_name]}: {row['count']}" for row in counts.iter_rows(named=True)]
+            top_vals_str = " | ".join(freq_vals)
+
+            if output == "print":
+                print(f"Column: {col_name}")
+                print(f"  Type: {dtype}\n  Missing: {null_count} ({null_pct}%)\n  Unique: {n_unique} (All Unique: {is_unique})\n  Top {self.top_n}: {top_vals_str}")
+                print("-" * 40)
+            else:
+                results.append({
+                    "column": col_name,
+                    "dtype": str(dtype),
+                    "missing_count": null_count,
+                    "missing_pct": null_pct,
+                    "unique_count": n_unique,
+                    "is_all_unique": is_unique,
+                    "top_values": top_vals_str
+                })
+
+        if output == "dataframe":
+            return pl.DataFrame(results)
+
+    def _profile_pyspark(self, df, output) -> SparkDataFrame | None:
+        """
+        Internal method to profile a PySpark DataFrame.
+
+        Args:
+            df (SparkDataFrame): The PySpark DataFrame to profile.
+            output (str): The desired output format ('print' or 'dataframe').
+
+        Returns:
+            SparkDataFrame | None: A PySpark DataFrame containing the profile if output='dataframe'.
+        """
+        total_rows = df.count()
+        results = []
+
+        if output == "print":
+            print(f"=== PYSPARK DATAFRAME PROFILE ===")
+            print(f"Shape: {total_rows} rows, {len(df.columns)} columns\n" + "=" * 40)
+
+        for col_name in df.columns:
+            dtype = df.schema[col_name].dataType.typeName()
+            
+            # Gather metrics using approx_count_distinct for performance
+            stats = df.agg(
+                F.sum(F.when(F.col(col_name).isNull(), 1).otherwise(0)).alias("nulls"),
+                F.approx_count_distinct(col_name).alias("approx_uniques")
+            ).collect()[0]
+
+            null_count = stats["nulls"] or 0
+            null_pct = round((null_count / total_rows * 100), 2) if total_rows > 0 else 0
+            n_unique = stats["approx_uniques"]
+            is_unique_approx = n_unique >= (total_rows * 0.99) # Approximation threshold
+
+            freq_df = df.groupBy(col_name).count().orderBy(F.col("count").desc()).limit(self.top_n).collect()
+            freq_vals = [f"{row[col_name]}: {row['count']}" for row in freq_df]
+            top_vals_str = " | ".join(freq_vals)
+
+            if output == "print":
+                print(f"Column: {col_name}")
+                print(f"  Type: {dtype}\n  Missing: {null_count} ({null_pct}%)\n  Approx Unique: {n_unique}\n  Top {self.top_n}: {top_vals_str}")
+                print("-" * 40)
+            else:
+                results.append((
+                    col_name, dtype, null_count, float(null_pct), 
+                    n_unique, is_unique_approx, top_vals_str
+                ))
+
+        if output == "dataframe":
+            spark = df.sparkSession
+            schema = StructType([
+                StructField("column", StringType(), True),
+                StructField("dtype", StringType(), True),
+                StructField("missing_count", LongType(), True),
+                StructField("missing_pct", DoubleType(), True),
+                StructField("approx_unique_count", LongType(), True),
+                StructField("is_all_unique_approx", BooleanType(), True),
+                StructField("top_values", StringType(), True)
+            ])
+            return spark.createDataFrame(results, schema=schema)
 
 def frame_shape(df: SparkDataFrame) -> tuple[int, int]:
     """
-    Returns the shape (rows, columns) of a Spark DataFrame.
-    Prints the result in a Polars-like format for quick debugging.
+    Calculates and prints the shape of a PySpark DataFrame in a Polars/Pandas-like format.
+
+    Args:
+        df (SparkDataFrame): The PySpark DataFrame to measure.
+
+    Returns:
+        tuple[int, int]: A tuple containing (row_count, column_count).
     """
     rows = df.count()
     cols = len(df.columns)
@@ -14,8 +167,16 @@ def frame_shape(df: SparkDataFrame) -> tuple[int, int]:
 
 def clean_column_names(df: SparkDataFrame) -> SparkDataFrame:
     """
-    Renames columns to be Delta-compatible. 
-    Keeps only alphanumeric characters and underscores.
+    Renames DataFrame columns to be Delta-compatible by replacing special characters.
+    
+    Keeps only alphanumeric characters and underscores, and collapses multiple 
+    consecutive underscores into a single one.
+
+    Args:
+        df (SparkDataFrame): The PySpark DataFrame with potentially invalid column names.
+
+    Returns:
+        SparkDataFrame: A new PySpark DataFrame with sanitized column names.
     """
     # Pattern: match anything that is NOT a-z, A-Z, 0-9, or _
     pattern = re.compile(r'[^a-zA-Z0-9_]')
@@ -31,8 +192,16 @@ def clean_column_names(df: SparkDataFrame) -> SparkDataFrame:
 
 def keep_duplicates(df: SparkDataFrame, subset: list[str] | str) -> SparkDataFrame:
     """
-    Filters the DataFrame to keep only rows that have duplicates 
-    based on the specified columns.
+    Filters the DataFrame to keep only rows that have duplicates based on specified columns.
+
+    Utilizes a Window function to count occurrences efficiently without performing a heavy join.
+
+    Args:
+        df (SparkDataFrame): The PySpark DataFrame to filter.
+        subset (list[str] | str): The column name(s) to evaluate for duplicates.
+
+    Returns:
+        SparkDataFrame: A PySpark DataFrame containing only the duplicated rows.
     """
     if isinstance(subset, str):
         subset = [subset]
@@ -48,20 +217,16 @@ def keep_duplicates(df: SparkDataFrame, subset: list[str] | str) -> SparkDataFra
 
 def glimpse(df: SparkDataFrame, n: int = 5, truncate: int = 75) -> None:
     """
-    Prints a concise summary of a Spark DataFrame, similar to R's dplyr::glimpse 
-    or Polars' .glimpse(). Shows the number of rows and columns, followed by 
-    column names, data types, and the first few values.
-    
-    Note: This triggers a spark job to count rows and fetch the top `n` records.
+    Prints a concise, vertical summary of a Spark DataFrame.
 
-    Parameters
-    ----------
-    df : SparkDataFrame
-        The PySpark DataFrame to glimpse.
-    n : int, optional
-        Number of rows to preview (default is 5).
-    truncate : int, optional
-        Maximum length of the string representation for the preview values (default is 75).
+    Similar to R's dplyr::glimpse or Polars' .glimpse(). Shows the number of rows 
+    and columns, followed by column names, data types, and the first few values.
+    Note: This triggers a Spark job to count rows and fetch the top `n` records.
+
+    Args:
+        df (SparkDataFrame): The PySpark DataFrame to glimpse.
+        n (int, optional): Number of rows to preview. Defaults to 5.
+        truncate (int, optional): Maximum string length for the preview values. Defaults to 75.
     """
     # 1. Get shape (triggers a Spark job)
     rows = df.count()
@@ -110,28 +275,24 @@ def apply_column_comments(
     verbose: bool = True
 ) -> None:
     """
-    Apply column comments on a table, but ONLY if the comment has changed.
-    
-    Logic:
+    Applies column comments to a specified table only if the comment has changed.
+
+    Logic workflow:
     1. Fetches current table schema and existing comments.
-    2. Warns about table columns missing from your input dictionary.
-    3. Iterates through your dictionary:
-       - Skips if the input comment is None or empty string "".
-       - Skips if the column doesn't exist in the table.
-       - Skips if the new comment matches the existing comment exactly.
+    2. Warns about table columns missing from the input dictionary.
+    3. Iterates through the input dictionary, skipping updates if:
+       - The input comment is None or an empty string.
+       - The column doesn't exist in the table.
+       - The new comment matches the existing comment exactly.
     4. Executes SQL only for actual changes.
 
-    Parameters
-    ----------
-    spark : SparkSession
-    table_name : str
-        Fully-qualified table name.
-    comments : dict
-        Mapping {column_name: comment_string}.
-    verbose : bool
-        If True, prints details about skipped vs updated columns.
+    Args:
+        spark (SparkSession): The active PySpark session.
+        table_name (str): Fully-qualified target table name.
+        comments (Dict[str, str]): A dictionary mapping column names to their new comment strings.
+        verbose (bool, optional): If True, prints details about skipped vs updated columns. 
+                                  Defaults to True.
     """
-    
     # 1. Get existing schema and metadata
     try:
         # We access schema directly without triggering a job
