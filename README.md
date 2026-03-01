@@ -7,6 +7,8 @@ Features:
 - VolumeSpiller: 
   - Utilize Unity Catalog Volume as a spillage bucket making the switch between pyspark and polars faster or just to save checkpoint parquet files.
   - Utilize the driver node file system as a temporary scan / sink storage for polars.
+- DataProfiler:
+  - generate a summary (printed or frame) of a pyspark or polars Dataframe columns including missing values, unique counts, and top frequent values
 - adds utility functions missing from pyspark, such as 
   - glimpse(), 
   - keep_duplicates(), 
