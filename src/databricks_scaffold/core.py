@@ -275,11 +275,23 @@ class VolumeSpiller:
 
     def teardown(self) -> None:
         """
-        Cleans up the initialized volume. In Dev mode, data is preserved for inspection.
-        In Prod mode, the volume and its contents are dropped.
+        Cleans up both the UC Volume and local driver temporary directories. 
+        In Dev mode, volume data is preserved.
         """
+        
+        # 1. Clean up local /tmp/ driver storage (Always happens)
+        if self.local_base_dir.exists():
+            shutil.rmtree(self.local_base_dir, ignore_errors=True)
+            print(f"🧹 LOCAL CLEANUP: Cleared driver temp directory {self.local_base_dir}")
+
+        # 2. Clean up active spark-polars temp directories
+        for temp_dir in self._active_temp_dirs:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        self._active_temp_dirs.clear()
+
+        # 3. Clean up UC Volume (Behaves differently in Dev vs Prod)
         if self.is_dev:
-            print(f"🛠️ DEV MODE: Data preserved at {self.volume_root}")
+            print(f"🛠️ DEV MODE: Volume data preserved at {self.volume_root}")
         else:
             self.spark.sql(f"DROP VOLUME IF EXISTS {self.full_name}")
             print(f"🗑️ PROD MODE: Volume {self.full_name} dropped.")
