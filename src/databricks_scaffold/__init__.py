@@ -5,6 +5,7 @@ from .utils import (
     frame_shape,
     clean_column_names,
     keep_duplicates,
+    is_unique,
     glimpse,
     apply_column_comments
 )
@@ -19,6 +20,7 @@ __all__ = [
     "frame_shape",
     "clean_column_names",
     "keep_duplicates",
+    "is_unique",
     "glimpse",
     "apply_column_comments"
 ]

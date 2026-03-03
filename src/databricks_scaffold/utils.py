@@ -215,6 +215,36 @@ def keep_duplicates(df: SparkDataFrame, subset: list[str] | str) -> SparkDataFra
         .drop("_dupe_count")
     )
 
+def is_unique(df: SparkDataFrame, column_name: str) -> bool:
+    """
+    Checks if all values in a specified column of a PySpark DataFrame are unique.
+    
+    Uses a short-circuiting groupBy operation for performance.
+
+    Args:
+        df (SparkDataFrame): The PySpark DataFrame to check.
+        column_name (str): The name of the column to evaluate.
+
+    Returns:
+        bool: True if the column is entirely unique, False otherwise.
+    """
+    if column_name not in df.columns:
+        raise ValueError(f"Column '{column_name}' not found in the DataFrame.")
+        
+    # Group by the column, count occurrences, and filter for counts > 1.
+    # take(1) triggers a short-circuit, making it much faster than a full distinct().count() 
+    # if a duplicate exists.
+    duplicates = df.groupBy(column_name).count().filter(F.col("count") > 1).take(1)
+    
+    unique = len(duplicates) == 0
+    
+    if unique:
+        print(f"Column '{column_name}' is unique: yes")
+    else:
+        print(f"Column '{column_name}' is unique: no")
+        
+    return unique
+
 def glimpse(df: SparkDataFrame, n: int = 5, truncate: int = 75) -> None:
     """
     Prints a concise, vertical summary of a Spark DataFrame.
