@@ -7,6 +7,7 @@ import polars as pl
 from pyspark.sql import DataFrame as SparkDataFrame, SparkSession
 import getpass
 from pathlib import Path
+import re
 
 class VolumeSpiller:
     """
@@ -180,6 +181,13 @@ class VolumeSpiller:
         if not isinstance(name, str) or not name.strip():
             raise ValueError("name must be a non-empty string")
 
+        # Strictly enforce directory name safety to prevent path traversal (e.g., "..", "/")
+        if not re.match(r"^[\w\-]+$", name):
+            raise ValueError(
+                f"Invalid checkpoint name '{name}'. To prevent accidental deletions, "
+                "names must only contain alphanumeric characters, underscores, or hyphens."
+            )
+
         base_path, resolved_storage = self._resolve_path(name, storage)
         # Delete all files in checkpoint directory before writing (making sure nothing mixes if something else is saved here)
         shutil.rmtree(base_path, ignore_errors=True)
@@ -192,7 +200,7 @@ class VolumeSpiller:
             compression = "zstd" if resolved_storage == "volume" else "snappy"
 
         if isinstance(df, pl.LazyFrame):
-            df.sink_parquet(target_path, compression=compression, engine="streaming")
+            df.sink_parquet(target_path, compression=compression)
         else:
             df.write_parquet(target_path, compression=compression)
 
@@ -219,6 +227,11 @@ class VolumeSpiller:
         Raises:
             FileNotFoundError: If the checkpoint directory does not exist.
         """
+        if not isinstance(name, str) or not re.match(r"^[\w\-]+$", name):
+            raise ValueError(
+                f"Invalid checkpoint name '{name}'. Names must only contain "
+                "alphanumeric characters, underscores, or hyphens."
+            )
 
         base_path, _ = self._resolve_path(name, storage)
 
@@ -250,6 +263,13 @@ class VolumeSpiller:
         if not isinstance(optimize_files, bool):
             raise TypeError(f"optimize_files must be bool, got {type(optimize_files).__name__}")
 
+        # Strictly enforce directory name safety to prevent path traversal (e.g., "..", "/")
+        if not re.match(r"^[\w\-]+$", name):
+            raise ValueError(
+                f"Invalid checkpoint name '{name}'. To prevent accidental deletions, "
+                "names must only contain alphanumeric characters, underscores, or hyphens."
+            )
+
         checkpoint_dir = self.get_path(name)
 
         if optimize_files:
@@ -272,6 +292,12 @@ class VolumeSpiller:
         Raises:
             FileNotFoundError: If the checkpoint directory does not exist.
         """
+        if not isinstance(name, str) or not re.match(r"^[\w\-]+$", name):
+            raise ValueError(
+                f"Invalid checkpoint name '{name}'. Names must only contain "
+                "alphanumeric characters, underscores, or hyphens."
+            )
+
         checkpoint_dir = self.get_path(name)
         if not os.path.exists(checkpoint_dir):
             raise FileNotFoundError(f"Checkpoint '{name}' not found at {checkpoint_dir}")
@@ -282,7 +308,6 @@ class VolumeSpiller:
         Cleans up both the UC Volume and local driver temporary directories. 
         In Dev mode, volume data is preserved.
         """
-        
         # 1. Clean up local /tmp/ driver storage (Always happens)
         if self.local_base_dir.exists():
             shutil.rmtree(self.local_base_dir, ignore_errors=True)
