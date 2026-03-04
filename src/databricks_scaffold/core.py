@@ -181,6 +181,10 @@ class VolumeSpiller:
             raise ValueError("name must be a non-empty string")
 
         base_path, resolved_storage = self._resolve_path(name, storage)
+        # Delete all files in checkpoint directory before writing (making sure nothing mixes if something else is saved here)
+        shutil.rmtree(base_path, ignore_errors=True)
+        os.makedirs(base_path, exist_ok=True)
+
         target_path = f"{base_path}/data.parquet"
 
         # AUTO-ROUTE COMPRESSION
@@ -332,13 +336,12 @@ class VolumeSpiller:
             if cleanup and eager:
                 shutil.rmtree(temp_dir, ignore_errors=True)
 
-    def polars_to_spark(self, df: pl.DataFrame | pl.LazyFrame, cleanup: bool = False) -> SparkDataFrame:
+    def polars_to_spark(self, df: pl.DataFrame | pl.LazyFrame) -> SparkDataFrame:
         """
         Spills a Polars DataFrame to the UC volume and reads it back as a PySpark DataFrame.
 
         Args:
             df (pl.DataFrame | pl.LazyFrame): The input Polars DataFrame or LazyFrame.
-            cleanup (bool, optional): If True, triggers a collection and deletes the temporary volume directory. Defaults to False.
 
         Returns:
             SparkDataFrame: The resulting PySpark DataFrame.
@@ -346,29 +349,18 @@ class VolumeSpiller:
         run_id = uuid.uuid4().hex
         temp_dir = self.get_path(f"spill_pl_sp_{run_id}")
         
-        if not cleanup: 
-            self._active_temp_dirs.append(temp_dir)
+        # Always track it for cleanup during teardown()
+        self._active_temp_dirs.append(temp_dir)
 
-        # Timestamp fix applies here
         df = self._prepare_polars_timestamps(df)
 
-        try:
-            os.makedirs(temp_dir, exist_ok=True)
-            file_path = f"{temp_dir}/part-0.parquet"
-            
-            # Hardcoding zstd since temp_dir routes to the Volume
-            if isinstance(df, pl.LazyFrame):
-                df.sink_parquet(file_path, compression="zstd")
-            else:
-                df.write_parquet(file_path, compression="zstd")
+        os.makedirs(temp_dir, exist_ok=True)
+        file_path = f"{temp_dir}/part-0.parquet"
+        
+        if isinstance(df, pl.LazyFrame):
+            df.sink_parquet(file_path, compression="zstd")
+        else:
+            df.write_parquet(file_path, compression="zstd")
 
-            spark_df = self.spark.read.parquet(temp_dir)
-            
-            if cleanup:
-                spark_df.collect()
-                
-            return spark_df
-
-        finally:
-            if cleanup:
-                shutil.rmtree(temp_dir, ignore_errors=True)
+        # Return the lazy pointer. The files must survive until teardown()
+        return self.spark.read.parquet(temp_dir)

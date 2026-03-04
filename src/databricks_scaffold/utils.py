@@ -109,20 +109,24 @@ class DataProfiler:
             print(f"=== PYSPARK DATAFRAME PROFILE ===")
             print(f"Shape: {total_rows} rows, {len(df.columns)} columns\n" + "=" * 40)
 
+        agg_exprs = []
+        for c in df.columns:
+            agg_exprs.append(F.sum(F.when(F.col(c).isNull(), 1).otherwise(0)).alias(f"{c}_nulls"))
+            agg_exprs.append(F.approx_count_distinct(c).alias(f"{c}_uniques"))
+        
+        # Executes exactly ONE Spark job to gather all nulls and unique counts
+        stats_row = df.agg(*agg_exprs).collect()[0]
+
         for col_name in df.columns:
             dtype = df.schema[col_name].dataType.typeName()
             
-            # Gather metrics using approx_count_distinct for performance
-            stats = df.agg(
-                F.sum(F.when(F.col(col_name).isNull(), 1).otherwise(0)).alias("nulls"),
-                F.approx_count_distinct(col_name).alias("approx_uniques")
-            ).collect()[0]
-
-            null_count = stats["nulls"] or 0
+            # Fetch the pre-calculated stats from the single row
+            null_count = stats_row[f"{col_name}_nulls"] or 0
             null_pct = round((null_count / total_rows * 100), 2) if total_rows > 0 else 0
-            n_unique = stats["approx_uniques"]
+            n_unique = stats_row[f"{col_name}_uniques"]
             is_unique_approx = n_unique >= (total_rows * 0.99) # Approximation threshold
 
+            # This triggers 1 job per column to get the top N frequent values
             freq_df = df.groupBy(col_name).count().orderBy(F.col("count").desc()).limit(self.top_n).collect()
             freq_vals = [f"{row[col_name]}: {row['count']}" for row in freq_df]
             top_vals_str = " | ".join(freq_vals)
@@ -165,55 +169,65 @@ def frame_shape(df: SparkDataFrame) -> tuple[int, int]:
     print(f"Shape: ({rows}, {cols})")
     return (rows, cols)
 
+
+
 def clean_column_names(df: SparkDataFrame) -> SparkDataFrame:
     """
     Renames DataFrame columns to be Delta-compatible by replacing special characters.
     
     Keeps only alphanumeric characters and underscores, and collapses multiple 
-    consecutive underscores into a single one.
+    consecutive underscores into a single one. Ensures unique column names to 
+    prevent ambiguous reference errors.
 
     Args:
         df (SparkDataFrame): The PySpark DataFrame with potentially invalid column names.
 
     Returns:
-        SparkDataFrame: A new PySpark DataFrame with sanitized column names.
+        SparkDataFrame: A new PySpark DataFrame with sanitized, unique column names.
     """
     # Pattern: match anything that is NOT a-z, A-Z, 0-9, or _
     pattern = re.compile(r'[^a-zA-Z0-9_]')
     
     new_cols = []
+    seen = set()
+    
     for col in df.columns:
         clean_name = pattern.sub('_', col)
-        # Optional: Collapse multiple underscores into one
+        # Collapse multiple underscores into one
         clean_name = re.sub(r'_+', '_', clean_name).strip('_')
-        new_cols.append(clean_name)
+        
+        # Fallback if the name was entirely special characters
+        if not clean_name:
+            clean_name = "column"
+            
+        # Deduplicate collisions to avoid Spark AnalysisExceptions
+        final_name = clean_name
+        counter = 1
+        while final_name in seen:
+            final_name = f"{clean_name}_{counter}"
+            counter += 1
+            
+        seen.add(final_name)
+        new_cols.append(final_name)
     
     return df.toDF(*new_cols)
 
 def keep_duplicates(df: SparkDataFrame, subset: list[str] | str) -> SparkDataFrame:
     """
     Filters the DataFrame to keep only rows that have duplicates based on specified columns.
-
-    Utilizes a Window function to count occurrences efficiently without performing a heavy join.
-
-    Args:
-        df (SparkDataFrame): The PySpark DataFrame to filter.
-        subset (list[str] | str): The column name(s) to evaluate for duplicates.
-
-    Returns:
-        SparkDataFrame: A PySpark DataFrame containing only the duplicated rows.
+    Optimized to prevent full-table shuffles by using a broadcast join.
     """
     if isinstance(subset, str):
         subset = [subset]
-        
-    # Use a Window to count occurrences without performing a heavy Join
-    window_spec = Window.partitionBy(*subset)
-    
-    return (
-        df.withColumn("_dupe_count", F.count("*").over(window_spec))
-        .filter(F.col("_dupe_count") > 1)
-        .drop("_dupe_count")
+
+    duplicate_keys = (
+        df.groupBy(*subset)
+        .count()
+        .filter(F.col("count") > 1)
+        .drop("count")
     )
+    
+    return df.join(F.broadcast(duplicate_keys), on=subset, how="inner")
 
 def is_unique(df: SparkDataFrame, column_name: str) -> bool:
     """

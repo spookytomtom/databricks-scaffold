@@ -12,6 +12,7 @@ Features:
 - adds utility functions missing from pyspark, such as 
   - glimpse(), 
   - keep_duplicates(), 
+  - is_unique(),
   - frame_shape(), 
   - clean_column_names(),
   - apply_column_comments(),
@@ -58,7 +59,7 @@ pl_result = (
 
 # 3. Push back to Spark
 # Note: This automatically fixes nanosecond timestamp issues compatible with Spark!
-final_spark_df = spill.polars_to_spark(pl_result, cleanup=True)
+final_spark_df = spill.polars_to_spark(pl_result)
 
 final_spark_df.display()
 
