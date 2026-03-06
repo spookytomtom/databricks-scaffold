@@ -7,7 +7,8 @@ from .utils import (
     keep_duplicates,
     is_unique,
     glimpse,
-    apply_column_comments
+    apply_column_comments,
+    display2
 )
 
 # Import types for aliasing
@@ -22,5 +23,6 @@ __all__ = [
     "keep_duplicates",
     "is_unique",
     "glimpse",
-    "apply_column_comments"
+    "apply_column_comments",
+    "display2"
 ]
