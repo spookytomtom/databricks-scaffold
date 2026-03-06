@@ -16,6 +16,7 @@ Features:
   - frame_shape(), 
   - clean_column_names(),
   - apply_column_comments(),
+  - display2(),
   - etc.
 
 # Something that works, but...
@@ -68,8 +69,7 @@ spill.teardown()
 ~~~
 ## 2. Checkpointing (Save & Load)
 Stop recalculating the same data. Save intermediate states to the Unity Catalog Volume or the local driver disk.
-### 💾 Saving to Unity Catalog (Persistent if configured)
-Data persists across cluster restarts.
+### 💾 Saving to Unity Catalog
 ~~~
 # Save a Polars DataFrame
 spill.save_checkpoint_pl(pl_df, name="step_1_cleaned", storage="volume")
