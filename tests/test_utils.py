@@ -1,3 +1,23 @@
+def test_resolve_is_dev_explicit():
+    from databricks_scaffold._internal import _resolve_is_dev
+    assert _resolve_is_dev(True) is True
+    assert _resolve_is_dev(False) is False
+
+def test_resolve_is_dev_default():
+    from databricks_scaffold._internal import _resolve_is_dev
+    # No notebook var set → defaults to True
+    assert _resolve_is_dev(None) is True
+
+def test_resolve_is_dev_string_booleans():
+    from unittest.mock import patch
+    from databricks_scaffold._internal import _resolve_is_dev
+    for falsy in ("false", "False", "FALSE", "0", "no", "f", ""):
+        with patch("databricks_scaffold._internal._get_notebook_var", return_value=falsy):
+            assert _resolve_is_dev(None) is False, f"Expected False for {falsy!r}"
+    for truthy in ("true", "True", "1", "yes"):
+        with patch("databricks_scaffold._internal._get_notebook_var", return_value=truthy):
+            assert _resolve_is_dev(None) is True, f"Expected True for {truthy!r}"
+
 def test_clean_column_names(spark):
     from databricks_scaffold.utils import clean_column_names
     data = [(1, "foo")]

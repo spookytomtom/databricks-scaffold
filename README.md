@@ -29,9 +29,11 @@ Uses a Unity Catalog Volume (or local driver `/tmp`) as a Parquet spill buffer t
 - Polars `ns`/`us` `Datetime` columns are cast to `ms` (Spark compatibility)
 - Polars `Datetime` columns without a timezone get `UTC` attached (prevents `timestamp_ntz` in Spark)
 
-**`is_dev` flag controls Volume lifecycle:**
-- `is_dev=True` — creates volume with `IF NOT EXISTS`; `teardown()` preserves volume data
-- `is_dev=False` — drops and recreates volume on init (clean slate); `teardown()` drops it
+**`IS_DEV` controls the entire library's behavior — set it once:**
+- `IS_DEV = True` — volume created with `IF NOT EXISTS`; `teardown()` preserves data; `display2()` renders output
+- `IS_DEV = False` — volume dropped and recreated on init (clean slate); `teardown()` drops it; `display2()` is silent
+
+`VolumeSpiller` and `display2()` both read `IS_DEV` from the notebook namespace automatically. You never need to pass it as an argument. Override per-instance with `VolumeSpiller(..., is_dev=False)` if needed.
 
 ---
 
@@ -54,11 +56,25 @@ Generates a column-level summary (missing values, unique counts, top frequent va
 | `is_unique(df, column_name)` | Checks if a column is entirely unique. Short-circuits on first duplicate found |
 | `clean_column_names(df)` | Replaces special characters with underscores, collapses runs of underscores, deduplicates collisions — Delta-compatible output |
 | `apply_column_comments(spark, table_name, comments, verbose=True)` | Applies column comments to a table via SQL, skipping columns whose comment hasn't changed |
-| `display2(df, is_dev=None)` | Calls Databricks `display()` only when `IS_DEV` is truthy. Reads `IS_DEV` from the notebook namespace automatically |
+| `display2(df, is_dev=None)` | Calls Databricks `display()` only when `IS_DEV` is truthy. Reads `IS_DEV` from the notebook namespace — same source as `VolumeSpiller` |
 
 ---
 
 ## Examples
+
+### Setting IS_DEV — do this once at the top of every notebook
+
+```python
+# Development: set manually
+IS_DEV = True
+
+# Production: Databricks passes it as a job widget
+IS_DEV = dbutils.widgets.get("IS_DEV")  # arrives as "False" — parsed automatically
+```
+
+That's it. `VolumeSpiller` and `display2()` both read `IS_DEV` from the notebook namespace. No need to pass it anywhere else.
+
+---
 
 ### The Polars sandwich: Spark → Polars → Spark
 
@@ -68,12 +84,14 @@ The core use case. Process a distributed Spark DataFrame with Polars on the driv
 import polars as pl
 from databricks_scaffold import VolumeSpiller
 
+IS_DEV = True  # or from widget
+
 spill = VolumeSpiller(
     spark=spark,
     catalog="main",
     schema="default",
     volume_name="my_spill_vol",
-    is_dev=True  # keeps data around for inspection
+    # is_dev not needed — reads IS_DEV from notebook automatically
 )
 
 # Spill to Volume and read as Polars (handles timestamps automatically)
@@ -245,14 +263,14 @@ apply_column_comments(spark, "main.default.customers", comments)
 
 ### Conditional display in notebooks
 
-`display2` calls Databricks' `display()` only when the `IS_DEV` flag is truthy, so you can leave display calls in production code paths safely.
+`display2` reads the same `IS_DEV` variable as `VolumeSpiller` — set it once and both behave correctly.
 
 ```python
 from databricks_scaffold import display2
 
 IS_DEV = True  # set once at the top of your notebook
 
-# These calls only render in dev; in prod they print a single skip message
+# Only renders in dev; silent in prod — no code changes needed between environments
 display2(spark_df)
 display2(pl_df)        # Polars is converted to pandas automatically
 display2(pandas_df)
@@ -262,7 +280,12 @@ display2(pandas_df)
 
 ### Production pattern
 
+In a Databricks job, define a widget parameter `IS_DEV` with value `False`. The library reads it automatically — no code changes required between dev and prod.
+
 ```python
+# Job widget sets IS_DEV = "False" — read it once at the top
+IS_DEV = dbutils.widgets.get("IS_DEV")
+
 from databricks_scaffold import VolumeSpiller
 
 spill = VolumeSpiller(
@@ -270,12 +293,14 @@ spill = VolumeSpiller(
     catalog="main",
     schema="default",
     volume_name="etl_spill",
-    is_dev=False  # drops + recreates volume on init; teardown() drops it
+    # reads IS_DEV="False" from notebook namespace automatically:
+    # - drops + recreates volume on init
+    # - teardown() drops it completely
 )
 
 try:
     pl_df = spill.spark_to_polars(raw_spark_df, optimize_files=True)
-    result = process(pl_df)                  # your Polars logic
+    result = process(pl_df)
     output_spark_df = spill.polars_to_spark(result)
     output_spark_df.write.saveAsTable("main.default.output")
 finally:

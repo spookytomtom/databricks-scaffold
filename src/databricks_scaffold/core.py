@@ -8,13 +8,14 @@ from pyspark.sql import DataFrame as SparkDataFrame, SparkSession
 import getpass
 from pathlib import Path
 import re
+from databricks_scaffold._internal import _resolve_is_dev
 
 class VolumeSpiller:
     """
     A utility class to manage data spilling and checkpointing between PySpark and Polars
     using Databricks Unity Catalog Volumes and local driver storage.
     """
-    def __init__(self, spark: SparkSession, catalog: str, schema: str, volume_name: str, is_dev: bool = False):
+    def __init__(self, spark: SparkSession, catalog: str, schema: str, volume_name: str, is_dev: bool = None):
         """
         Initializes the VolumeSpiller, setting up paths and managing the underlying UC Volume.
 
@@ -23,11 +24,13 @@ class VolumeSpiller:
             catalog (str): The Unity Catalog name.
             schema (str): The schema (database) name within the catalog.
             volume_name (str): The name of the volume to use for spilling.
-            is_dev (bool, optional): If True, preserves data and uses CREATE IF NOT EXISTS. 
-                                     If False (Prod), drops and recreates the volume for a clean slate. Defaults to False.
+            is_dev (bool, optional): If True, preserves data and uses CREATE IF NOT EXISTS.
+                                     If False (Prod), drops and recreates the volume for a clean slate.
+                                     If not provided, reads IS_DEV from the notebook namespace.
+                                     Defaults to True if IS_DEV is not set anywhere.
         """
         self.spark = spark if spark else SparkSession.builder.getOrCreate()
-        self.is_dev = is_dev
+        self.is_dev = _resolve_is_dev(is_dev)
         self.full_name = f"{catalog}.{schema}.{volume_name}"
         self.volume_root = f"/Volumes/{catalog}/{schema}/{volume_name}"
         user = getpass.getuser()
