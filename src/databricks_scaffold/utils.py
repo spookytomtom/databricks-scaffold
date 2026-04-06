@@ -1,11 +1,9 @@
 import re
 from pyspark.sql import DataFrame as SparkDataFrame, functions as F, Window, SparkSession
 from pyspark.sql.types import StructType, StructField, StringType, LongType, DoubleType, BooleanType
-from typing import Dict 
-import inspect
-import builtins
-from typing import Any
+from typing import Dict, Any
 import polars as pl
+from databricks_scaffold._internal import _get_notebook_var, _resolve_is_dev
 
 class DataProfiler:
     """
@@ -413,39 +411,18 @@ def apply_column_comments(
     if verbose:
         print(f"\n--- Done. Updated: {updated_count} | Skipped (No Change): {skipped_count} ---")
 
-def _get_notebook_var(var_name: str) -> Any:
-    """
-    Fetches a variable directly from the Databricks notebook's interactive namespace.
-    This avoids call-stack walking and guarantees we see what the notebook sees.
-    """
-    try:
-        # Databricks notebooks run an IPython kernel
-        from IPython import get_ipython
-        ipy = get_ipython()
-        if ipy is not None and var_name in ipy.user_ns:
-            return ipy.user_ns[var_name]
-    except ImportError:
-        pass
-    return None
-
 def display2(df: Any, is_dev: bool = None) -> None:
     """
-    Displays a DataFrame (Spark, Polars, or Pandas) using Databricks' built-in display() 
-    only if is_dev is True. If is_dev is not explicitly provided, it checks the environment.
+    Displays a DataFrame (Spark, Polars, or Pandas) using Databricks' built-in display()
+    only if is_dev is True. If is_dev is not explicitly provided, reads IS_DEV from the
+    notebook namespace. Defaults to True if IS_DEV is not set.
 
     Args:
         df: The DataFrame to display.
         is_dev (bool, optional): Flag indicating if the environment is development.
     """
-    # 1. Resolve IS_DEV from the notebook environment
-    if is_dev is None:
-        raw_is_dev = _get_notebook_var("IS_DEV")
-        
-        # Handle string booleans (e.g., if set via a notebook widget)
-        if isinstance(raw_is_dev, str):
-            is_dev = raw_is_dev.strip().lower() not in ("false", "f", "0", "no", "")
-        else:
-            is_dev = bool(raw_is_dev)
+    # 1. Resolve IS_DEV using shared logic
+    is_dev = _resolve_is_dev(is_dev)
 
     if not is_dev:
         print("Skipping display (IS_DEV is False or not found).")
