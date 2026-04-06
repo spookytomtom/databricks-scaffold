@@ -1,132 +1,283 @@
 # databricks-scaffold
-Productivity booster functions for using polars on Databricks. Ease the pain of working with small data on Databricks. Single node rebellion 🔥
 
-Helps the process of switching back and forth between PySpark Dataframe and polars Dataframe and _more_.
+Productivity utilities for working with Polars on Databricks. Bridges the gap between PySpark and Polars, adds missing DataFrame utilities, and makes single-node workflows on Databricks fast and ergonomic.
 
-Features:
-- VolumeSpiller: 
-  - Utilize Unity Catalog Volume as a spillage bucket making the switch between pyspark and polars faster or just to save checkpoint parquet files.
-  - Utilize the driver node file system as a temporary scan / sink storage for polars.
-- DataProfiler:
-  - generate a summary (printed or frame) of a pyspark or polars Dataframe columns including missing values, unique counts, and top frequent values
-- adds utility functions missing from pyspark, such as 
-  - glimpse(), 
-  - keep_duplicates(), 
-  - is_unique(),
-  - frame_shape(), 
-  - clean_column_names(),
-  - apply_column_comments(),
-  - display2(),
-  - etc.
-
-# Something that works, but...
-As of PySpark 4.0 the DataFrame object has a [toArrow](https://spark.apache.org/docs/latest/api/python/reference/pyspark.sql/api/pyspark.sql.DataFrame.toArrow.html#pyspark.sql.DataFrame.toArrow)() method which helps the conversion to polars. 
-Polars can utilize the [from_arrow](https://docs.pola.rs/api/python/stable/reference/api/polars.from_arrow.html)() method enabling zero-copy exchange of DataFrame.
-
-# ... but
-Read this part from PySpark:
-`This method should only be used if the resulting PyArrow pyarrow.Table is expected to be small, as all the data is loaded into the driver's memory.`\
-The catch is that when using a simple Serverless the PySpark DataFrame is stored on different nodes across the cluster. This means spark needs to collect it into the driver memory which takes network time and can produce memory spikes crashing the job.
-
-One workaround is to load the data in batches, which is even slower.
-
-# Something else that works, but...
-Polars [scan_delta](https://docs.pola.rs/api/python/stable/reference/api/polars.scan_delta.html)() works, but you need credentials and you can't yet write so not 100% solved process.
-
-# Usage examples
-Install it:
-~~~
+```
 %pip install git+https://github.com/spookytomtom/databricks-scaffold.git
-~~~
+```
 
-## 1. 🥪The "Polars Sandwich" (Spark ➡ Polars ➡ Spark)
-The most common use case: taking a distributed Spark DataFrame, bringing it to the driver as Polars for fast single-node processing, and sending it back.
-~~~
+---
+
+## What's included
+
+### `VolumeSpiller`
+Uses a Unity Catalog Volume (or local driver `/tmp`) as a Parquet spill buffer to move data between Spark and Polars without collecting through the driver.
+
+| Method | Description |
+|--------|-------------|
+| `spark_to_polars(df, eager, cleanup, optimize_files)` | Write Spark DF to Volume as Parquet, read back as Polars `DataFrame` or `LazyFrame` |
+| `polars_to_spark(df)` | Write Polars DF to Volume as Parquet, read back as Spark `DataFrame` |
+| `save_checkpoint_pl(df, name, storage, compression)` | Persist a Polars DF/LazyFrame to a named checkpoint on Volume or local `/tmp` |
+| `load_checkpoint_pl(name, eager, storage)` | Load a named Polars checkpoint back as `DataFrame` or `LazyFrame` |
+| `save_checkpoint_spark(df, name, optimize_files)` | Persist a Spark DF to a named checkpoint on the Volume |
+| `load_checkpoint_spark(name)` | Load a named Spark checkpoint |
+| `list_checkpoints(storage)` | List all checkpoint names in Volume or local storage |
+| `teardown()` | Delete temp spill dirs and (in prod) drop the Volume |
+| `get_path(name)` | Resolve the absolute Volume path for a given name |
+
+**Auto-fixes silently applied on every write:**
+- Polars `ns`/`us` `Datetime` columns are cast to `ms` (Spark compatibility)
+- Polars `Datetime` columns without a timezone get `UTC` attached (prevents `timestamp_ntz` in Spark)
+
+**`is_dev` flag controls Volume lifecycle:**
+- `is_dev=True` — creates volume with `IF NOT EXISTS`; `teardown()` preserves volume data
+- `is_dev=False` — drops and recreates volume on init (clean slate); `teardown()` drops it
+
+---
+
+### `DataProfiler`
+Generates a column-level summary (missing values, unique counts, top frequent values) for both Polars and Spark DataFrames.
+
+| Method | Description |
+|--------|-------------|
+| `profile(df, output="print")` | Auto-detects Polars vs Spark. `output="print"` prints to console; `output="dataframe"` returns a summary DataFrame |
+
+---
+
+### Spark utility functions
+
+| Function | Description |
+|----------|-------------|
+| `glimpse(df, n=5, truncate=75)` | Vertical schema + data preview, like R's `dplyr::glimpse` |
+| `frame_shape(df)` | Prints and returns `(rows, cols)` tuple for a Spark DF |
+| `keep_duplicates(df, subset)` | Returns only rows that have duplicates on the given columns. Uses a broadcast join to avoid a full shuffle |
+| `is_unique(df, column_name)` | Checks if a column is entirely unique. Short-circuits on first duplicate found |
+| `clean_column_names(df)` | Replaces special characters with underscores, collapses runs of underscores, deduplicates collisions — Delta-compatible output |
+| `apply_column_comments(spark, table_name, comments, verbose=True)` | Applies column comments to a table via SQL, skipping columns whose comment hasn't changed |
+| `display2(df, is_dev=None)` | Calls Databricks `display()` only when `IS_DEV` is truthy. Reads `IS_DEV` from the notebook namespace automatically |
+
+---
+
+## Examples
+
+### The Polars sandwich: Spark → Polars → Spark
+
+The core use case. Process a distributed Spark DataFrame with Polars on the driver, then push it back.
+
+```python
+import polars as pl
 from databricks_scaffold import VolumeSpiller
 
-# Initialize (Pro-tip: Use is_dev=True to keep data for inspection after run)
-spill = VolumeSpiller(catalog="main", schema="default", volume_name="spill_vol", is_dev=True)
-
-# 1. Spill Spark DataFrame to Volume and load as Polars
-# This handles the I/O automatically
-pl_df = spill.spark_to_polars(spark_df, optimize_files=True)
-
-# 2. Do your heavy lifting in Polars (Standard API)
-pl_result = (
-    pl_df.filter(pl.col("status") == "active")
-    .group_by("region")
-    .agg(pl.sum("sales"))
+spill = VolumeSpiller(
+    spark=spark,
+    catalog="main",
+    schema="default",
+    volume_name="my_spill_vol",
+    is_dev=True  # keeps data around for inspection
 )
 
-# 3. Push back to Spark
-# Note: This automatically fixes nanosecond timestamp issues compatible with Spark!
-final_spark_df = spill.polars_to_spark(pl_result)
+# Spill to Volume and read as Polars (handles timestamps automatically)
+pl_df = spill.spark_to_polars(spark_df, optimize_files=True)
 
+# Standard Polars processing on the driver
+result = (
+    pl_df
+    .filter(pl.col("status") == "active")
+    .with_columns(pl.col("revenue").fill_null(0))
+    .group_by("region")
+    .agg(
+        pl.sum("revenue").alias("total_revenue"),
+        pl.count("id").alias("customer_count"),
+    )
+    .sort("total_revenue", descending=True)
+)
+
+# Push back to Spark — nanosecond and timezone fixes are applied automatically
+final_spark_df = spill.polars_to_spark(result)
 final_spark_df.display()
 
-# Clean up the volume when done
 spill.teardown()
-~~~
-## 2. Checkpointing (Save & Load)
-Stop recalculating the same data. Save intermediate states to the Unity Catalog Volume or the local driver disk.
-### 💾 Saving to Unity Catalog
-~~~
-# Save a Polars DataFrame
-spill.save_checkpoint_pl(pl_df, name="step_1_cleaned", storage="volume")
+```
 
-# Save a Spark DataFrame
-spill.save_checkpoint_spark(spark_df, name="raw_spark_backup")
+---
 
-# List what you have saved
+### Streaming large data with LazyFrames
+
+When the data doesn't fit in driver RAM, use `eager=False` to get a `LazyFrame` and stream it directly to a checkpoint without materialising in memory.
+
+```python
+# Scan the Volume without loading anything into RAM yet
+lazy_pl = spill.spark_to_polars(large_spark_df, eager=False)
+
+# Build a query plan
+q = (
+    lazy_pl
+    .filter(pl.col("event_date") >= "2024-01-01")
+    .group_by("user_id")
+    .agg(pl.sum("spend").alias("total_spend"))
+)
+
+# Sink directly to a checkpoint — never fully materialises on the driver
+spill.save_checkpoint_pl(q, name="user_spend_2024", storage="volume")
+
+# Load back later as a LazyFrame for further chaining, or eagerly
+df = spill.load_checkpoint_pl("user_spend_2024", eager=True)
+```
+
+---
+
+### Checkpointing — stop recalculating expensive steps
+
+```python
+# --- First run: expensive computation ---
+cleaned_spark = (
+    raw_spark_df
+    .dropDuplicates(["event_id"])
+    .filter("event_date >= '2024-01-01'")
+)
+spill.save_checkpoint_spark(cleaned_spark, name="cleaned_events")
+
+pl_enriched = (
+    spill.spark_to_polars(cleaned_spark)
+    .with_columns(pl.col("amount").log1p().alias("log_amount"))
+)
+spill.save_checkpoint_pl(pl_enriched, name="enriched_events")
+
+# --- Subsequent runs: skip straight to the result ---
+pl_enriched = spill.load_checkpoint_pl("enriched_events")
+
 print(spill.list_checkpoints(storage="volume"))
-# Output: ['raw_spark_backup', 'step_1_cleaned']
-~~~
-### ⚡Saving to Local Driver (Ephemeral)
-Faster IO, but data is lost when the cluster restarts. Great for temporary caching during a notebook session.
-~~~
-# Save to /tmp on the driver
-spill.save_checkpoint_pl(pl_df, name="temp_cache", storage="local")
+# ['cleaned_events', 'enriched_events']
+```
 
-# Load it back
-df_cached = spill.load_checkpoint_pl(name="temp_cache", storage="local")
-~~~
-## 3. 💤Lazy Execution (Streaming)
-If your data is too large to fit entirely in RAM, use Polars LazyFrames. VolumeSpiller supports this natively.
-~~~
-# 1. Convert Spark to Polars LazyFrame (eager=False)
-# This scans the parquet files instead of reading them into memory immediately
-lazy_pl = spill.spark_to_polars(spark_df, eager=False)
+---
 
-# 2. Build your query plan
-q = lazy_pl.filter(pl.col("value") > 100).select("id", "value")
+### Profiling a DataFrame
 
-# 3. Execute or save
-# You can sink directly back to a checkpoint without ever materializing in RAM
-spill.save_checkpoint_pl(q, name="processed_lazy", storage="volume")
-~~~
-## 4. 🕝Automatic Timestamp Fixes
-Spark uses Microseconds (us); Polars defaults to Nanoseconds (ns). Usually, this causes crashes when moving data. `VolumeSpiller` handles this silently.
-~~~
-# If your Polars DF has ns/us timestamps:
-# pl_df = pl.DataFrame({"time": [datetime.now()]}) # default is ns
+Works on both Polars and Spark. Auto-detects the type.
 
-# This method detects 'ns' and 'us' columns and casts them to 'ms' automatically
-# before writing to Parquet, preventing Spark read errors.
-# If no timezone is assinged, UTC will be added automatically.
-spark_df = spill.polars_to_spark(pl_df)
-~~~
-## 5. 🛠️Dev vs. 🚀Prod Mode
-The is_dev flag controls how the Volume is treated during initialization and teardown.
- - is_dev=True: Creates volume if missing. teardown() preserves files for debugging.
- - is_dev=False: Drops and recreates volume on init (clean slate). teardown() destroys the volume.
-~~~
-# PRODUCTION PATTERN .py
+```python
+from databricks_scaffold import DataProfiler
+
+profiler = DataProfiler(top_n_freq=5)
+
+# Printed summary
+profiler.profile(spark_df)
+
+# Or get a DataFrame back for downstream use
+summary_df = profiler.profile(pl_df, output="dataframe")
+```
+
+```
+=== POLARS DATAFRAME PROFILE ===
+Shape: 50000 rows, 6 columns
+========================================
+Column: region
+  Type: String
+  Missing: 0 (0.0%)
+  Unique: 8 (All Unique: False)
+  Top 5: EMEA: 18200 | AMER: 15400 | APAC: 11300 | ...
+```
+
+---
+
+### Inspecting Spark DataFrames
+
+```python
+from databricks_scaffold import glimpse, frame_shape, is_unique, keep_duplicates
+
+# Vertical schema + sample values
+glimpse(df)
+# Rows: 50000
+# Columns: 5
+# $ customer_id   <bigint>  1001, 1002, 1003, 1004, 1005
+# $ region        <string>  EMEA, AMER, APAC, EMEA, AMER
+# $ revenue       <double>  1200.5, 850.0, null, 3100.0, 200.0
+# $ status        <string>  active, churned, active, active, trial
+# $ signup_date   <date>    2023-01-10, 2022-07-04, 2023-03-15, ...
+
+# Shape without count + columns separately
+frame_shape(df)  # Shape: (50000, 5)
+
+# Column uniqueness check (short-circuits on first duplicate)
+is_unique(df, "customer_id")  # Column 'customer_id' is unique: yes
+
+# Keep only duplicate rows for investigation
+dupes = keep_duplicates(df, subset=["email", "signup_date"])
+```
+
+---
+
+### Cleaning column names for Delta
+
+```python
+from databricks_scaffold import clean_column_names
+
+# Input columns: ["Customer ID", "First.Name", "Revenue (USD)", "% Growth"]
+df_clean = clean_column_names(df)
+# Output columns: ["Customer_ID", "First_Name", "Revenue_USD", "Growth"]
+```
+
+---
+
+### Applying column comments efficiently
+
+Only executes SQL for columns whose comment has actually changed.
+
+```python
+from databricks_scaffold import apply_column_comments
+
+comments = {
+    "customer_id": "Unique identifier for the customer, sourced from CRM",
+    "revenue":     "Total billed revenue in USD, excluding refunds",
+    "region":      "Sales region: AMER, EMEA, or APAC",
+}
+
+apply_column_comments(spark, "main.default.customers", comments)
+# Updating 'revenue':
+#    Old: 'Billed revenue'
+#    New: 'Total billed revenue in USD, excluding refunds'
+# Skipping 'region': Input comment is empty.
+# --- Done. Updated: 1 | Skipped (No Change): 2 ---
+```
+
+---
+
+### Conditional display in notebooks
+
+`display2` calls Databricks' `display()` only when the `IS_DEV` flag is truthy, so you can leave display calls in production code paths safely.
+
+```python
+from databricks_scaffold import display2
+
+IS_DEV = True  # set once at the top of your notebook
+
+# These calls only render in dev; in prod they print a single skip message
+display2(spark_df)
+display2(pl_df)        # Polars is converted to pandas automatically
+display2(pandas_df)
+```
+
+---
+
+### Production pattern
+
+```python
+from databricks_scaffold import VolumeSpiller
+
+spill = VolumeSpiller(
+    spark=spark,
+    catalog="main",
+    schema="default",
+    volume_name="etl_spill",
+    is_dev=False  # drops + recreates volume on init; teardown() drops it
+)
+
 try:
-    spill = VolumeSpiller(..., is_dev=False)
-    
-    # ... logic ...
-    
+    pl_df = spill.spark_to_polars(raw_spark_df, optimize_files=True)
+    result = process(pl_df)                  # your Polars logic
+    output_spark_df = spill.polars_to_spark(result)
+    output_spark_df.write.saveAsTable("main.default.output")
 finally:
-    # ensuring the volume is dropped to save costs/storage
-    spill.teardown()
-~~~
+    spill.teardown()  # volume is dropped, no storage costs left behind
+```
