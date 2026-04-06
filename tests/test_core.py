@@ -61,7 +61,7 @@ def test_polars_to_spark_conversion(spiller):
         "val": [1.1, 2.2]
     })
     
-    spark_df = spiller.polars_to_spark(pl_df, cleanup=True)
+    spark_df = spiller.polars_to_spark(pl_df)
     
     # Collect to local list to verify
     rows = spark_df.sort("id").collect()
