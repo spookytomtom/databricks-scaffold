@@ -2,6 +2,7 @@ import pytest
 import shutil
 import os
 from pathlib import Path
+from unittest.mock import patch
 from pyspark.sql import SparkSession
 from databricks_scaffold.core import VolumeSpiller
 
@@ -28,14 +29,16 @@ def spiller(spark, tmp_path):
     fake_volume_root = tmp_path / "Volumes" / "main" / "default" / "test_vol"
     fake_volume_root.mkdir(parents=True, exist_ok=True)
     
-    # Initialize the class
-    spiller_instance = VolumeSpiller(
-        spark=spark,
-        catalog="main",
-        schema="default",
-        volume_name="test_vol",
-        is_dev=True
-    )
+    # Initialize the class — patch spark.sql to avoid Databricks-only
+    # CREATE/DROP VOLUME commands that fail in a local SparkSession
+    with patch.object(spark, "sql", return_value=None):
+        spiller_instance = VolumeSpiller(
+            spark=spark,
+            catalog="main",
+            schema="default",
+            volume_name="test_vol",
+            is_dev=True
+        )
 
     # MONKEY PATCH: Override the hardcoded /Volumes path to our temp path
     spiller_instance.volume_root = str(fake_volume_root)
