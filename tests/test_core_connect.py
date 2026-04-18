@@ -186,3 +186,26 @@ def test_polars_to_spark_full_roundtrip_with_spark_to_polars(spiller_connect, sp
     rows = spark_back.sort("id").collect()
     assert [r["id"] for r in rows] == [10, 20]
     assert [r["txt"] for r in rows] == ["a", "b"]
+
+
+def test_resolve_path_volume_under_connect_does_not_call_os_makedirs(spiller_connect, monkeypatch):
+    calls = {"os_makedirs": 0}
+    real_makedirs = os.makedirs
+
+    def tracking_makedirs(path, *a, **kw):
+        if str(path).startswith(str(spiller_connect.volume_root)):
+            calls["os_makedirs"] += 1
+        return real_makedirs(path, *a, **kw)
+
+    monkeypatch.setattr(os, "makedirs", tracking_makedirs)
+
+    path, storage = spiller_connect._resolve_path("some_ckpt", "volume")
+    assert storage == "volume"
+    assert calls["os_makedirs"] == 0
+    assert os.path.isdir(path)
+
+
+def test_resolve_path_local_still_uses_os_makedirs(spiller_connect):
+    path, storage = spiller_connect._resolve_path("local_ckpt", "local")
+    assert storage == "local"
+    assert os.path.isdir(path)
