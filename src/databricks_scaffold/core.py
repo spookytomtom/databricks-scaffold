@@ -71,6 +71,23 @@ class VolumeSpiller:
             self._w = WorkspaceClient()
         return self._w
 
+    def _volume_mkdirs(self, volume_path: str) -> None:
+        """Create a directory on the volume (idempotent). Routes via Files API under Connect."""
+        if self._is_connect:
+            self._workspace.files.create_directory(volume_path)
+        else:
+            os.makedirs(volume_path, exist_ok=True)
+
+    def _volume_exists(self, volume_path: str) -> bool:
+        """Check whether a directory exists on the volume."""
+        if self._is_connect:
+            try:
+                self._workspace.files.get_directory_metadata(volume_path)
+                return True
+            except Exception:
+                return False
+        return os.path.exists(volume_path)
+
     def get_path(self, name: str) -> str:
         """
         Returns the absolute path for a named folder within the UC volume.
