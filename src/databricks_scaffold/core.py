@@ -10,6 +10,20 @@ from pathlib import Path
 import re
 from databricks_scaffold._internal import _resolve_is_dev
 
+def _is_databricks_connect(spark) -> bool:
+    """
+    Detects whether the given SparkSession is a Databricks Connect session.
+
+    Returns True only when databricks.connect is installed AND the session is an
+    instance of DatabricksSession. Returns False for plain pyspark.sql.SparkSession
+    (on-cluster or local) and when the databricks.connect package is unavailable.
+    """
+    try:
+        from databricks.connect.session import DatabricksSession
+    except ImportError:
+        return False
+    return isinstance(spark, DatabricksSession)
+
 class VolumeSpiller:
     """
     A utility class to manage data spilling and checkpointing between PySpark and Polars
