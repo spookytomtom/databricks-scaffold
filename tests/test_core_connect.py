@@ -24,3 +24,29 @@ def test_spiller_workspace_client_is_lazy(spiller_connect):
     proving that _workspace is an attribute read (not a hard-coded construction).
     """
     assert spiller_connect._workspace is spiller_connect._w
+
+
+import os
+
+
+def test_volume_mkdirs_uses_files_api_under_connect(spiller_connect):
+    target = f"{spiller_connect.volume_root}/new_dir/nested"
+    spiller_connect._volume_mkdirs(target)
+    # Our fake Files API delegates to os.makedirs, so the dir should exist on disk
+    assert os.path.isdir(target)
+
+
+def test_volume_mkdirs_uses_os_on_cluster(spiller, tmp_path):
+    target = f"{spiller.volume_root}/on_cluster_dir"
+    spiller._volume_mkdirs(target)
+    assert os.path.isdir(target)
+
+
+def test_volume_exists_true_when_dir_present(spiller_connect):
+    target = f"{spiller_connect.volume_root}/present"
+    os.makedirs(target)
+    assert spiller_connect._volume_exists(target) is True
+
+
+def test_volume_exists_false_when_dir_missing(spiller_connect):
+    assert spiller_connect._volume_exists(f"{spiller_connect.volume_root}/absent") is False
