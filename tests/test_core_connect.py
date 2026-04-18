@@ -282,3 +282,33 @@ def test_list_checkpoints_local_under_connect(spiller_connect):
     spiller_connect.save_checkpoint_pl(df, name="local_ckpt", storage="local")
     names = spiller_connect.list_checkpoints(storage="local")
     assert names == ["local_ckpt"]
+
+
+def test_load_checkpoint_spark_under_connect_roundtrip(spiller_connect, spark):
+    spark_df = spark.createDataFrame([(1, "a"), (2, "b")], ["id", "txt"])
+    spiller_connect.save_checkpoint_spark(spark_df, name="sp_ckpt")
+
+    loaded = spiller_connect.load_checkpoint_spark("sp_ckpt")
+    rows = loaded.sort("id").collect()
+    assert [r["id"] for r in rows] == [1, 2]
+
+
+def test_load_checkpoint_spark_raises_when_missing_under_connect(spiller_connect):
+    with pytest.raises(FileNotFoundError):
+        spiller_connect.load_checkpoint_spark("absent_ckpt")
+
+
+def test_load_checkpoint_spark_under_connect_does_not_call_os_path_exists_on_volume(spiller_connect, spark, monkeypatch):
+    spark_df = spark.createDataFrame([(1,)], ["id"])
+    spiller_connect.save_checkpoint_spark(spark_df, name="sp_ckpt2")
+
+    real_exists = os.path.exists
+
+    def guarded_exists(path):
+        if str(path).startswith(str(spiller_connect.volume_root)):
+            raise AssertionError(f"os.path.exists called on volume path: {path}")
+        return real_exists(path)
+
+    monkeypatch.setattr(os.path, "exists", guarded_exists)
+    loaded = spiller_connect.load_checkpoint_spark("sp_ckpt2")
+    assert loaded.count() == 1
