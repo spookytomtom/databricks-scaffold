@@ -82,6 +82,8 @@ Hardcoded — do not change without reason:
 
 `VolumeSpiller` works under Databricks Connect as well as on-cluster. Detection runs once at `__init__` via `_is_databricks_connect(spark)`. This function checks `isinstance(spark, DatabricksSession)` **and** also checks `type(spark).__module__ == "pyspark.sql.connect.session"` — because `DatabricksSession.builder.getOrCreate()` returns a `pyspark.sql.connect.session.SparkSession`, not a `DatabricksSession` instance. No user action required.
 
+**Databricks Connect does not require a local PySpark install.** That is the whole point — PySpark operations run on the remote Databricks cluster, while local Python (Polars, Pandas, etc.) runs on your machine. Install only `databricks-connect` (which bundles its own PySpark), **not** a separate `pyspark`. Installing both causes version conflicts that break `from databricks.connect import DatabricksSession`. The `databricks-connect` version must match your cluster's Databricks Runtime version (e.g., `databricks-connect==15.4.x` for Runtime 15.4).
+
 Under Databricks Connect, every operation that would otherwise touch `/Volumes/...` from local Python code is routed through the Databricks SDK Files API (`WorkspaceClient.files`). Polars writes to a local `/tmp` staging dir first, then `files.upload_from` streams the parquet up. For reads, `files.download_to` pulls parquet into `/tmp` before Polars opens it.
 
 - **Detection:** `_is_databricks_connect(spark)` — returns False for plain `SparkSession`.
