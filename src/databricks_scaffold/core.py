@@ -286,18 +286,20 @@ class VolumeSpiller:
         """
         Saves a Polars DataFrame checkpoint to either the UC Volume or driver-local /tmp.
 
+        Under Databricks Connect with storage='volume', the parquet is written to a
+        local /tmp staging file and then uploaded to the volume via the Files API.
+
         Args:
             df (pl.DataFrame | pl.LazyFrame): The Polars DataFrame to save.
             name (str): The name of the checkpoint.
-            storage (str, optional): Target storage, either 'volume' or 'local'. Defaults to 'volume'.
-            compression (str, optional): Compression algorithm ('auto', 'zstd', 'snappy', 'uncompressed').
-                                         'auto' routes to 'zstd' for volume and 'snappy' for local. Defaults to 'auto'.
+            storage (str, optional): Target storage, 'volume' or 'local'. Defaults to 'volume'.
+            compression (str, optional): 'auto', 'zstd', 'snappy', or 'uncompressed'.
+                'auto' routes to 'zstd' for volume and 'snappy' for local. Defaults to 'auto'.
 
         Raises:
             TypeError: If df is not a Polars DataFrame/LazyFrame.
             ValueError: If name is empty or invalid.
         """
-        # AUTO-FIX TIMESTAMPS
         df = self._prepare_polars_timestamps(df)
 
         if not isinstance(df, (pl.DataFrame, pl.LazyFrame)):
@@ -306,7 +308,6 @@ class VolumeSpiller:
         if not isinstance(name, str) or not name.strip():
             raise ValueError("name must be a non-empty string")
 
-        # Strictly enforce directory name safety to prevent path traversal (e.g., "..", "/")
         if not re.match(r"^[\w\-]+$", name):
             raise ValueError(
                 f"Invalid checkpoint name '{name}'. To prevent accidental deletions, "
@@ -314,20 +315,34 @@ class VolumeSpiller:
             )
 
         base_path, resolved_storage = self._resolve_path(name, storage)
-        # Delete all files in checkpoint directory before writing (making sure nothing mixes if something else is saved here)
-        shutil.rmtree(base_path, ignore_errors=True)
-        os.makedirs(base_path, exist_ok=True)
 
-        target_path = f"{base_path}/data.parquet"
-
-        # AUTO-ROUTE COMPRESSION
         if compression == "auto":
             compression = "zstd" if resolved_storage == "volume" else "snappy"
 
-        if isinstance(df, pl.LazyFrame):
-            df.sink_parquet(target_path, compression=compression)
+        if resolved_storage == "volume":
+            self._volume_rmtree(base_path)
+            self._volume_mkdirs(base_path)
         else:
-            df.write_parquet(target_path, compression=compression)
+            shutil.rmtree(base_path, ignore_errors=True)
+            os.makedirs(base_path, exist_ok=True)
+
+        if resolved_storage == "volume" and self._is_connect:
+            staging_dir = tempfile.mkdtemp(prefix="ckpt_pl_")
+            try:
+                local_file = os.path.join(staging_dir, "data.parquet")
+                if isinstance(df, pl.LazyFrame):
+                    df.sink_parquet(local_file, compression=compression)
+                else:
+                    df.write_parquet(local_file, compression=compression)
+                self._upload_dir_to_volume(staging_dir, base_path)
+            finally:
+                shutil.rmtree(staging_dir, ignore_errors=True)
+        else:
+            target_path = f"{base_path}/data.parquet"
+            if isinstance(df, pl.LazyFrame):
+                df.sink_parquet(target_path, compression=compression)
+            else:
+                df.write_parquet(target_path, compression=compression)
 
         prefix = "⚡ Local" if resolved_storage == "local" else "✅ Volume"
         print(f"{prefix} checkpoint '{name}' written using {compression} compression.")
