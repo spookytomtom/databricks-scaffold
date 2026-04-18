@@ -1,10 +1,73 @@
 import pytest
 import shutil
 import os
+import errno
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 from pyspark.sql import SparkSession
 from databricks_scaffold.core import VolumeSpiller
+
+
+class _FakeNotFound(Exception):
+    """Stand-in for databricks.sdk.errors.NotFound used by the fake Files API."""
+
+
+class FakeFilesAPI:
+    """
+    Emulates databricks.sdk.WorkspaceClient().files against the local filesystem.
+    Every method signature matches the real SDK so the production code cannot tell
+    the difference. Raises _FakeNotFound for missing paths so tests can assert on it.
+    """
+
+    def upload_from(self, file_path, source_path, overwrite=True, use_parallel=True, parallelism=None, part_size=None):
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        if not overwrite and os.path.exists(file_path):
+            raise FileExistsError(file_path)
+        shutil.copyfile(source_path, file_path)
+
+    def download_to(self, file_path, local_path, use_parallel=True, parallelism=None):
+        if not os.path.exists(file_path):
+            raise _FakeNotFound(file_path)
+        os.makedirs(os.path.dirname(local_path) or ".", exist_ok=True)
+        shutil.copyfile(file_path, local_path)
+
+    def create_directory(self, directory_path):
+        os.makedirs(directory_path, exist_ok=True)
+
+    def get_directory_metadata(self, directory_path):
+        if not os.path.isdir(directory_path):
+            raise _FakeNotFound(directory_path)
+        return SimpleNamespace(path=directory_path)
+
+    def list_directory_contents(self, directory_path):
+        if not os.path.isdir(directory_path):
+            raise _FakeNotFound(directory_path)
+        for name in sorted(os.listdir(directory_path)):
+            full = os.path.join(directory_path, name)
+            yield SimpleNamespace(name=name, path=full, is_directory=os.path.isdir(full))
+
+    def delete(self, file_path):
+        try:
+            os.remove(file_path)
+        except FileNotFoundError:
+            raise _FakeNotFound(file_path)
+
+    def delete_directory(self, directory_path):
+        try:
+            os.rmdir(directory_path)
+        except FileNotFoundError:
+            raise _FakeNotFound(directory_path)
+        except OSError as e:
+            if e.errno == errno.ENOTEMPTY:
+                raise
+            raise
+
+
+class FakeWorkspaceClient:
+    def __init__(self):
+        self.files = FakeFilesAPI()
+
 
 @pytest.fixture(scope="session")
 def spark():
@@ -51,3 +114,15 @@ def spiller(spark, tmp_path):
     
     # Teardown handles cleanup
     spiller_instance.teardown()
+
+
+@pytest.fixture
+def spiller_connect(spiller, monkeypatch):
+    """
+    Returns a VolumeSpiller with Databricks Connect mode forced on and a fake
+    WorkspaceClient attached. Volume paths are still local tmp_path dirs (inherited
+    from the `spiller` fixture), so the fake Files API operates on them directly.
+    """
+    spiller._is_connect = True
+    spiller._w = FakeWorkspaceClient()
+    return spiller
