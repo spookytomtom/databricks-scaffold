@@ -59,7 +59,8 @@ class VolumeSpiller:
             self.spark.sql(f"DROP VOLUME IF EXISTS {self.full_name}")
             self.spark.sql(f"CREATE VOLUME {self.full_name}")
             
-        self._active_temp_dirs = []
+        self._active_local_dirs: list[str] = []
+        self._active_volume_dirs: list[str] = []
         self._is_connect = _is_databricks_connect(self.spark)
         self._w = None
 
@@ -424,20 +425,22 @@ class VolumeSpiller:
 
     def teardown(self) -> None:
         """
-        Cleans up both the UC Volume and local driver temporary directories. 
-        In Dev mode, volume data is preserved.
+        Cleans up local driver temp dirs and UC Volume state. In Dev mode, volume
+        root is preserved; in Prod, it is dropped. Under Databricks Connect, volume
+        cleanup goes through the Files API.
         """
-        # 1. Clean up local /tmp/ driver storage (Always happens)
         if self.local_base_dir.exists():
             shutil.rmtree(self.local_base_dir, ignore_errors=True)
             print(f"🧹 LOCAL CLEANUP: Cleared driver temp directory {self.local_base_dir}")
 
-        # 2. Clean up active spark-polars temp directories
-        for temp_dir in self._active_temp_dirs:
-            shutil.rmtree(temp_dir, ignore_errors=True)
-        self._active_temp_dirs.clear()
+        for d in self._active_local_dirs:
+            shutil.rmtree(d, ignore_errors=True)
+        self._active_local_dirs.clear()
 
-        # 3. Clean up UC Volume (Behaves differently in Dev vs Prod)
+        for d in self._active_volume_dirs:
+            self._volume_rmtree(d)
+        self._active_volume_dirs.clear()
+
         if self.is_dev:
             print(f"🛠️ DEV MODE: Volume data preserved at {self.volume_root}")
         else:
@@ -461,7 +464,7 @@ class VolumeSpiller:
         temp_dir = self.get_path(f"spill_sp_pl_{run_id}")
         
         if not (cleanup and eager):
-            self._active_temp_dirs.append(temp_dir)
+            self._active_volume_dirs.append(temp_dir)
 
         try:
             if optimize_files:
@@ -494,7 +497,7 @@ class VolumeSpiller:
         temp_dir = self.get_path(f"spill_pl_sp_{run_id}")
         
         # Always track it for cleanup during teardown()
-        self._active_temp_dirs.append(temp_dir)
+        self._active_volume_dirs.append(temp_dir)
 
         df = self._prepare_polars_timestamps(df)
 
