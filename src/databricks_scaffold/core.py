@@ -460,6 +460,7 @@ class VolumeSpiller:
 
         Raises:
             FileNotFoundError: If the checkpoint directory does not exist.
+            ValueError: If name is invalid.
         """
         if not isinstance(name, str) or not re.match(r"^[\w\-]+$", name):
             raise ValueError(
@@ -468,7 +469,7 @@ class VolumeSpiller:
             )
 
         checkpoint_dir = self.get_path(name)
-        if not os.path.exists(checkpoint_dir):
+        if not self._volume_exists(checkpoint_dir):
             raise FileNotFoundError(f"Checkpoint '{name}' not found at {checkpoint_dir}")
         return self.spark.read.parquet(checkpoint_dir)
 
