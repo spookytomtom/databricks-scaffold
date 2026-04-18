@@ -14,6 +14,38 @@ def test_returns_false_when_sdk_not_installed(spark, monkeypatch):
     assert _is_databricks_connect(spark) is False
 
 
+def test_detects_connect_session_by_module(monkeypatch):
+    """
+    DatabricksSession.builder.getOrCreate() returns pyspark.sql.connect.session.SparkSession,
+    not a DatabricksSession instance. Detection must identify it by module name.
+    """
+    from unittest.mock import MagicMock
+    connect_session = MagicMock()
+    connect_session.__class__ = type("SparkSession", (object,), {})
+    connect_session.__class__.__module__ = "pyspark.sql.connect.session"
+    assert _is_databricks_connect(connect_session) is True
+
+
+def test_local_session_by_module_returns_false():
+    """
+    A pyspark.sql.session.SparkSession (on-cluster/local) must not be
+    detected as Connect even though it has a different module path.
+    """
+    from unittest.mock import MagicMock
+    local_session = MagicMock()
+    local_session.__class__ = type("SparkSession", (object,), {})
+    local_session.__class__.__module__ = "pyspark.sql.session"
+    assert _is_databricks_connect(local_session) is False
+
+
+def test_detects_connect_session_by_module(spocker_connect):
+    """
+    DatabricksSession.builder.getOrCreate() returns pyspark.sql.connect.session.SparkSession,
+    not a DatabricksSession instance. Detection should identify it by module name.
+    """
+    assert spiller_connect._is_connect is True
+
+
 def test_spiller_caches_is_connect_false(spiller):
     assert spiller._is_connect is False
 
