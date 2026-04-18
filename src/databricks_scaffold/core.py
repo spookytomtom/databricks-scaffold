@@ -1,5 +1,6 @@
 import uuid
 import shutil
+import tempfile
 import os
 import glob
 import functools
@@ -449,39 +450,62 @@ class VolumeSpiller:
 
     def spark_to_polars(self, df: SparkDataFrame, cleanup: bool = False, eager: bool = True, optimize_files: bool = False) -> pl.DataFrame | pl.LazyFrame:
         """
-        Spills a PySpark DataFrame to the UC volume and reads it back as a Polars DataFrame.
+        Spills a PySpark DataFrame to the UC volume, then reads it back as Polars.
+
+        Under Databricks Connect, the parquet files are additionally downloaded from
+        the volume to a local /tmp directory before Polars reads them, because
+        /Volumes/... is not mounted on the local driver.
 
         Args:
             df (SparkDataFrame): The input PySpark DataFrame.
-            cleanup (bool, optional): If True and eager is True, deletes the temporary volume directory after reading. Defaults to False.
-            eager (bool, optional): If True, reads as a pl.DataFrame. If False, scans as a pl.LazyFrame. Defaults to True.
-            optimize_files (bool, optional): If True, coalesces to 2 partitions before writing. Defaults to False.
+            cleanup (bool, optional): If True and eager is True, deletes the temporary
+                volume directory (and the local staging dir under Connect) after reading.
+                Defaults to False.
+            eager (bool, optional): If True, reads as a pl.DataFrame. If False, scans as a
+                pl.LazyFrame. Defaults to True.
+            optimize_files (bool, optional): If True, coalesces to 2 partitions before
+                writing. Defaults to False.
 
         Returns:
-            pl.DataFrame | pl.LazyFrame: The resulting Polars DataFrame or LazyFrame.
+            pl.DataFrame | pl.LazyFrame
         """
         run_id = uuid.uuid4().hex
-        temp_dir = self.get_path(f"spill_sp_pl_{run_id}")
-        
-        if not (cleanup and eager):
-            self._active_volume_dirs.append(temp_dir)
+        volume_temp_dir = self.get_path(f"spill_sp_pl_{run_id}")
+        track_volume = not (cleanup and eager)
+        if track_volume:
+            self._active_volume_dirs.append(volume_temp_dir)
 
+        local_staging_dir = None
         try:
             if optimize_files:
-                df = df.coalesce(2) 
+                df = df.coalesce(2)
 
-            # Hardcoding zstd since temp_dir routes to the Volume
-            df.write.mode("overwrite").option("compression", "zstd").parquet(temp_dir)
-            glob_path = f"{temp_dir}/*.parquet"
-            
-            if eager:
-                return pl.read_parquet(glob_path)
+            df.write.mode("overwrite").option("compression", "zstd").parquet(volume_temp_dir)
+
+            if self._is_connect:
+                local_staging_dir = tempfile.mkdtemp(prefix="spill_sp_pl_")
+                self._download_volume_dir(volume_temp_dir, local_staging_dir)
+                read_path = f"{local_staging_dir}/*.parquet"
             else:
-                return pl.scan_parquet(glob_path)
+                read_path = f"{volume_temp_dir}/*.parquet"
+
+            if eager:
+                result = pl.read_parquet(read_path)
+                if self._is_connect and local_staging_dir is not None:
+                    shutil.rmtree(local_staging_dir, ignore_errors=True)
+                    local_staging_dir = None
+                return result
+            else:
+                if self._is_connect and local_staging_dir is not None:
+                    self._active_local_dirs.append(local_staging_dir)
+                    local_staging_dir = None  # ownership transferred to teardown
+                return pl.scan_parquet(read_path)
 
         finally:
             if cleanup and eager:
-                shutil.rmtree(temp_dir, ignore_errors=True)
+                self._volume_rmtree(volume_temp_dir)
+            if local_staging_dir is not None:
+                shutil.rmtree(local_staging_dir, ignore_errors=True)
 
     def polars_to_spark(self, df: pl.DataFrame | pl.LazyFrame) -> SparkDataFrame:
         """

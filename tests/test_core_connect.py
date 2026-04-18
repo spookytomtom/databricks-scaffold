@@ -130,3 +130,33 @@ def test_teardown_cleans_both_local_and_volume_tracked_dirs(spiller_connect, tmp
 
     assert not local_dir.exists()
     assert not os.path.exists(volume_dir)
+
+
+import polars as pl
+
+
+def test_spark_to_polars_connect_eager_returns_dataframe(spiller_connect, spark):
+    spark_df = spark.createDataFrame([(1, "a"), (2, "b")], ["id", "txt"])
+    pl_df = spiller_connect.spark_to_polars(spark_df, eager=True, cleanup=True)
+    assert isinstance(pl_df, pl.DataFrame)
+    assert pl_df.shape == (2, 2)
+    assert sorted(pl_df["id"].to_list()) == [1, 2]
+
+
+def test_spark_to_polars_connect_cleanup_true_removes_local_staging(spiller_connect, spark, tmp_path):
+    spark_df = spark.createDataFrame([(1,)], ["id"])
+    _ = spiller_connect.spark_to_polars(spark_df, eager=True, cleanup=True)
+    assert spiller_connect._active_local_dirs == []
+    leftover = list(spiller_connect.local_base_dir.rglob("*.parquet"))
+    assert leftover == []
+
+
+def test_spark_to_polars_connect_lazy_tracks_staging_dir(spiller_connect, spark):
+    spark_df = spark.createDataFrame([(1,)], ["id"])
+    lf = spiller_connect.spark_to_polars(spark_df, eager=False)
+    assert isinstance(lf, pl.LazyFrame)
+    assert len(spiller_connect._active_local_dirs) == 1
+    staging = spiller_connect._active_local_dirs[0]
+    assert any(name.endswith(".parquet") for name in os.listdir(staging))
+    df = lf.collect()
+    assert df.shape == (1, 1)
