@@ -258,8 +258,14 @@ class VolumeSpiller:
         """
         if storage == "volume":
             root = self.volume_root
-            if not os.path.exists(root):
+            if not self._volume_exists(root):
                 return []
+            if self._is_connect:
+                return sorted(
+                    e.name
+                    for e in self._workspace.files.list_directory_contents(root)
+                    if e.is_directory
+                )
             return sorted(
                 name for name in os.listdir(root)
                 if os.path.isdir(os.path.join(root, name))

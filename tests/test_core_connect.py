@@ -257,3 +257,28 @@ def test_load_checkpoint_pl_volume_lazy_tracks_staging(spiller_connect):
     assert isinstance(lf, pl.LazyFrame)
     assert len(spiller_connect._active_local_dirs) == 1
     assert lf.collect().shape == (1, 1)
+
+
+def test_list_checkpoints_volume_under_connect(spiller_connect, monkeypatch):
+    df = pl.DataFrame({"id": [1]})
+    spiller_connect.save_checkpoint_pl(df, name="ckpt_a", storage="volume")
+    spiller_connect.save_checkpoint_pl(df, name="ckpt_b", storage="volume")
+
+    real_listdir = os.listdir
+
+    def guarded_listdir(path):
+        if str(path).startswith(str(spiller_connect.volume_root)):
+            raise AssertionError(f"os.listdir called on volume path: {path}")
+        return real_listdir(path)
+
+    monkeypatch.setattr(os, "listdir", guarded_listdir)
+
+    names = spiller_connect.list_checkpoints(storage="volume")
+    assert sorted(names) == ["ckpt_a", "ckpt_b"]
+
+
+def test_list_checkpoints_local_under_connect(spiller_connect):
+    df = pl.DataFrame({"id": [1]})
+    spiller_connect.save_checkpoint_pl(df, name="local_ckpt", storage="local")
+    names = spiller_connect.list_checkpoints(storage="local")
+    assert names == ["local_ckpt"]
