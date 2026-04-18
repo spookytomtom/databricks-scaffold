@@ -160,3 +160,29 @@ def test_spark_to_polars_connect_lazy_tracks_staging_dir(spiller_connect, spark)
     assert any(name.endswith(".parquet") for name in os.listdir(staging))
     df = lf.collect()
     assert df.shape == (1, 1)
+
+
+def test_polars_to_spark_connect_roundtrip(spiller_connect):
+    pl_df = pl.DataFrame({"id": [10, 20, 30], "val": [1.1, 2.2, 3.3]})
+    spark_df = spiller_connect.polars_to_spark(pl_df)
+    rows = spark_df.sort("id").collect()
+    assert [r["id"] for r in rows] == [10, 20, 30]
+    assert [r["val"] for r in rows] == [1.1, 2.2, 3.3]
+
+
+def test_polars_to_spark_connect_tracks_volume_dir_for_teardown(spiller_connect):
+    pl_df = pl.DataFrame({"id": [1]})
+    _ = spiller_connect.polars_to_spark(pl_df)
+    assert len(spiller_connect._active_volume_dirs) == 1
+    vol_dir = spiller_connect._active_volume_dirs[0]
+    assert os.path.exists(f"{vol_dir}/part-0.parquet")
+
+
+def test_polars_to_spark_full_roundtrip_with_spark_to_polars(spiller_connect, spark):
+    spark_df = spark.createDataFrame([(1, "a"), (2, "b")], ["id", "txt"])
+    pl_df = spiller_connect.spark_to_polars(spark_df, eager=True, cleanup=True)
+    pl_mod = pl_df.with_columns(pl.col("id") * 10)
+    spark_back = spiller_connect.polars_to_spark(pl_mod)
+    rows = spark_back.sort("id").collect()
+    assert [r["id"] for r in rows] == [10, 20]
+    assert [r["txt"] for r in rows] == ["a", "b"]

@@ -511,27 +511,39 @@ class VolumeSpiller:
         """
         Spills a Polars DataFrame to the UC volume and reads it back as a PySpark DataFrame.
 
+        Under Databricks Connect, Polars writes to a local /tmp staging file first; the
+        file is then uploaded to the volume via the Files API, and Spark reads the volume
+        directory. On-cluster, Polars writes directly to the FUSE-mounted volume path.
+
         Args:
             df (pl.DataFrame | pl.LazyFrame): The input Polars DataFrame or LazyFrame.
 
         Returns:
-            SparkDataFrame: The resulting PySpark DataFrame.
+            SparkDataFrame
         """
         run_id = uuid.uuid4().hex
-        temp_dir = self.get_path(f"spill_pl_sp_{run_id}")
-        
-        # Always track it for cleanup during teardown()
-        self._active_volume_dirs.append(temp_dir)
+        volume_temp_dir = self.get_path(f"spill_pl_sp_{run_id}")
+        self._active_volume_dirs.append(volume_temp_dir)
 
         df = self._prepare_polars_timestamps(df)
 
-        os.makedirs(temp_dir, exist_ok=True)
-        file_path = f"{temp_dir}/part-0.parquet"
-        
-        if isinstance(df, pl.LazyFrame):
-            df.sink_parquet(file_path, compression="zstd")
+        if self._is_connect:
+            local_staging_dir = tempfile.mkdtemp(prefix="spill_pl_sp_")
+            try:
+                local_file = os.path.join(local_staging_dir, "part-0.parquet")
+                if isinstance(df, pl.LazyFrame):
+                    df.sink_parquet(local_file, compression="zstd")
+                else:
+                    df.write_parquet(local_file, compression="zstd")
+                self._upload_dir_to_volume(local_staging_dir, volume_temp_dir)
+            finally:
+                shutil.rmtree(local_staging_dir, ignore_errors=True)
         else:
-            df.write_parquet(file_path, compression="zstd")
+            os.makedirs(volume_temp_dir, exist_ok=True)
+            volume_file = f"{volume_temp_dir}/part-0.parquet"
+            if isinstance(df, pl.LazyFrame):
+                df.sink_parquet(volume_file, compression="zstd")
+            else:
+                df.write_parquet(volume_file, compression="zstd")
 
-        # Return the lazy pointer. The files must survive until teardown()
-        return self.spark.read.parquet(temp_dir)
+        return self.spark.read.parquet(volume_temp_dir)
