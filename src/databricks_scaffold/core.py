@@ -145,7 +145,7 @@ class VolumeSpiller:
             dst = os.path.join(local_dir, entry.name)
             self._workspace.files.download_to(
                 file_path=entry.path,
-                local_path=dst,
+                destination=dst,
                 use_parallel=True,
             )
 
