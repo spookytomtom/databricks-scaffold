@@ -356,31 +356,54 @@ class VolumeSpiller:
         """
         Loads a named Parquet checkpoint into a Polars DataFrame.
 
+        Under Databricks Connect with storage='volume', the parquet files are
+        downloaded to a local /tmp staging directory before Polars reads them.
+        In eager mode the staging dir is cleaned immediately; in lazy mode it is
+        added to _active_local_dirs so teardown() reclaims it.
+
         Args:
             name (str): The name of the checkpoint to load.
-            eager (bool, optional): If True, returns a DataFrame. If False, returns a LazyFrame. Defaults to True.
-            storage (str, optional): Storage location, either 'volume' or 'local'. Defaults to 'volume'.
-
-        Returns:
-            pl.DataFrame | pl.LazyFrame: The loaded Polars DataFrame or LazyFrame.
+            eager (bool, optional): DataFrame if True, LazyFrame if False. Defaults to True.
+            storage (str, optional): 'volume' or 'local'. Defaults to 'volume'.
 
         Raises:
             FileNotFoundError: If the checkpoint directory does not exist.
+            ValueError: If name is invalid or storage is unsupported.
         """
         if not isinstance(name, str) or not re.match(r"^[\w\-]+$", name):
             raise ValueError(
                 f"Invalid checkpoint name '{name}'. Names must only contain "
                 "alphanumeric characters, underscores, or hyphens."
             )
+        if storage not in ("volume", "local"):
+            raise ValueError("storage must be 'volume' or 'local'")
 
-        base_path, _ = self._resolve_path(name, storage)
+        if storage == "volume":
+            base_path = self.get_path(name)
+            if not self._volume_exists(base_path):
+                raise FileNotFoundError(f"Checkpoint '{name}' not found at {base_path}")
 
+            if self._is_connect:
+                staging_dir = tempfile.mkdtemp(prefix="ckpt_pl_load_")
+                self._download_volume_dir(base_path, staging_dir)
+                read_path = f"{staging_dir}/*.parquet"
+                if eager:
+                    try:
+                        return pl.read_parquet(read_path)
+                    finally:
+                        shutil.rmtree(staging_dir, ignore_errors=True)
+                else:
+                    self._active_local_dirs.append(staging_dir)
+                    return pl.scan_parquet(read_path)
+            else:
+                read_path = f"{base_path}/*.parquet"
+                return pl.read_parquet(read_path) if eager else pl.scan_parquet(read_path)
+
+        base_path = str(self.local_base_dir / name)
         if not os.path.exists(base_path):
             raise FileNotFoundError(f"Checkpoint '{name}' not found at {base_path}")
-
-        glob_path = f"{base_path}/*.parquet"
-
-        return pl.read_parquet(glob_path) if eager else pl.scan_parquet(glob_path)
+        read_path = f"{base_path}/*.parquet"
+        return pl.read_parquet(read_path) if eager else pl.scan_parquet(read_path)
 
     def save_checkpoint_spark(self, df: SparkDataFrame, name: str, optimize_files: bool = False) -> None:
         """

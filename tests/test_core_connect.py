@@ -235,3 +235,25 @@ def test_save_checkpoint_pl_local_unchanged_under_connect(spiller_connect):
     spiller_connect.save_checkpoint_pl(df, name="gold_local", storage="local")
     expected = spiller_connect.local_base_dir / "gold_local" / "data.parquet"
     assert expected.exists()
+
+
+def test_load_checkpoint_pl_volume_under_connect_roundtrip(spiller_connect):
+    df = pl.DataFrame({"id": [1, 2], "val": ["a", "b"]})
+    spiller_connect.save_checkpoint_pl(df, name="rt_vol", storage="volume")
+    loaded = spiller_connect.load_checkpoint_pl("rt_vol", eager=True, storage="volume")
+    assert isinstance(loaded, pl.DataFrame)
+    assert loaded.sort("id").equals(df.sort("id"))
+
+
+def test_load_checkpoint_pl_volume_raises_when_missing(spiller_connect):
+    with pytest.raises(FileNotFoundError):
+        spiller_connect.load_checkpoint_pl("does_not_exist", storage="volume")
+
+
+def test_load_checkpoint_pl_volume_lazy_tracks_staging(spiller_connect):
+    df = pl.DataFrame({"id": [1]})
+    spiller_connect.save_checkpoint_pl(df, name="lazy_vol", storage="volume")
+    lf = spiller_connect.load_checkpoint_pl("lazy_vol", eager=False, storage="volume")
+    assert isinstance(lf, pl.LazyFrame)
+    assert len(spiller_connect._active_local_dirs) == 1
+    assert lf.collect().shape == (1, 1)
