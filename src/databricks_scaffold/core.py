@@ -128,6 +128,41 @@ class VolumeSpiller:
         except Exception:
             pass
 
+    def _download_volume_dir(self, volume_dir: str, local_dir: str) -> None:
+        """
+        Download every *.parquet file in volume_dir to local_dir. Non-parquet files
+        are skipped for the same reason as _upload_dir_to_volume.
+        """
+        os.makedirs(local_dir, exist_ok=True)
+        for entry in self._workspace.files.list_directory_contents(volume_dir):
+            if entry.is_directory or not entry.name.endswith(".parquet"):
+                continue
+            dst = os.path.join(local_dir, entry.name)
+            self._workspace.files.download_to(
+                file_path=entry.path,
+                local_path=dst,
+                use_parallel=True,
+            )
+
+    def _upload_dir_to_volume(self, local_dir: str, volume_dir: str) -> None:
+        """
+        Upload every *.parquet file in local_dir to volume_dir. Non-parquet files
+        (_SUCCESS, .crc) are skipped — they are Spark-side artifacts that Polars
+        doesn't need and that the round-trip shouldn't propagate.
+        """
+        self._volume_mkdirs(volume_dir)
+        for name in os.listdir(local_dir):
+            if not name.endswith(".parquet"):
+                continue
+            src = os.path.join(local_dir, name)
+            dst = f"{volume_dir}/{name}"
+            self._workspace.files.upload_from(
+                file_path=dst,
+                source_path=src,
+                overwrite=True,
+                use_parallel=True,
+            )
+
     def get_path(self, name: str) -> str:
         """
         Returns the absolute path for a named folder within the UC volume.
