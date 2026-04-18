@@ -209,3 +209,29 @@ def test_resolve_path_local_still_uses_os_makedirs(spiller_connect):
     path, storage = spiller_connect._resolve_path("local_ckpt", "local")
     assert storage == "local"
     assert os.path.isdir(path)
+
+
+def test_save_checkpoint_pl_volume_under_connect(spiller_connect):
+    df = pl.DataFrame({"id": [1, 2, 3], "val": ["x", "y", "z"]})
+    spiller_connect.save_checkpoint_pl(df, name="gold_vol", storage="volume")
+    assert os.path.exists(f"{spiller_connect.volume_root}/gold_vol/data.parquet")
+
+
+def test_save_checkpoint_pl_volume_overwrites_stale_files(spiller_connect):
+    ckpt_dir = f"{spiller_connect.volume_root}/gold_vol"
+    os.makedirs(ckpt_dir)
+    with open(f"{ckpt_dir}/stale.parquet", "wb") as f:
+        f.write(b"stale")
+
+    df = pl.DataFrame({"id": [1]})
+    spiller_connect.save_checkpoint_pl(df, name="gold_vol", storage="volume")
+
+    assert not os.path.exists(f"{ckpt_dir}/stale.parquet")
+    assert os.path.exists(f"{ckpt_dir}/data.parquet")
+
+
+def test_save_checkpoint_pl_local_unchanged_under_connect(spiller_connect):
+    df = pl.DataFrame({"id": [1]})
+    spiller_connect.save_checkpoint_pl(df, name="gold_local", storage="local")
+    expected = spiller_connect.local_base_dir / "gold_local" / "data.parquet"
+    assert expected.exists()
