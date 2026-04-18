@@ -50,3 +50,30 @@ def test_volume_exists_true_when_dir_present(spiller_connect):
 
 def test_volume_exists_false_when_dir_missing(spiller_connect):
     assert spiller_connect._volume_exists(f"{spiller_connect.volume_root}/absent") is False
+
+
+def test_volume_listdir_returns_entry_names(spiller_connect):
+    root = spiller_connect.volume_root
+    os.makedirs(f"{root}/ckpt_a")
+    os.makedirs(f"{root}/ckpt_b")
+    names = spiller_connect._volume_listdir(root)
+    assert sorted(names) == ["ckpt_a", "ckpt_b"]
+
+
+def test_volume_listdir_returns_empty_for_missing_dir(spiller_connect):
+    assert spiller_connect._volume_listdir(f"{spiller_connect.volume_root}/absent") == []
+
+
+def test_volume_rmtree_removes_nested_files_and_dir(spiller_connect):
+    target = f"{spiller_connect.volume_root}/to_delete"
+    os.makedirs(target)
+    with open(f"{target}/a.parquet", "wb") as f:
+        f.write(b"x")
+    with open(f"{target}/b.parquet", "wb") as f:
+        f.write(b"y")
+    spiller_connect._volume_rmtree(target)
+    assert not os.path.exists(target)
+
+
+def test_volume_rmtree_is_silent_when_missing(spiller_connect):
+    spiller_connect._volume_rmtree(f"{spiller_connect.volume_root}/never_existed")

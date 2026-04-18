@@ -88,6 +88,46 @@ class VolumeSpiller:
                 return False
         return os.path.exists(volume_path)
 
+    def _volume_listdir(self, volume_path: str) -> list[str]:
+        """List entry names in a volume directory. Returns [] for missing directory."""
+        if self._is_connect:
+            try:
+                return [e.name for e in self._workspace.files.list_directory_contents(volume_path)]
+            except Exception:
+                return []
+        if not os.path.exists(volume_path):
+            return []
+        return os.listdir(volume_path)
+
+    def _volume_rmtree(self, volume_path: str) -> None:
+        """
+        Remove a volume directory and all its contents. Silent when missing.
+        Under Connect, the Files API has no recursive delete — we walk contents,
+        delete each file, then remove the now-empty directory. Nested subdirs are
+        recursed into.
+        """
+        if not self._is_connect:
+            shutil.rmtree(volume_path, ignore_errors=True)
+            return
+
+        try:
+            entries = list(self._workspace.files.list_directory_contents(volume_path))
+        except Exception:
+            return  # directory doesn't exist — nothing to do
+
+        for entry in entries:
+            if entry.is_directory:
+                self._volume_rmtree(entry.path)
+            else:
+                try:
+                    self._workspace.files.delete(entry.path)
+                except Exception:
+                    pass
+        try:
+            self._workspace.files.delete_directory(volume_path)
+        except Exception:
+            pass
+
     def get_path(self, name: str) -> str:
         """
         Returns the absolute path for a named folder within the UC volume.
