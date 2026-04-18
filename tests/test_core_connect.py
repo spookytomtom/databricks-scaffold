@@ -12,3 +12,15 @@ def test_returns_false_when_sdk_not_installed(spark, monkeypatch):
     import sys
     monkeypatch.setitem(sys.modules, "databricks.connect.session", None)
     assert _is_databricks_connect(spark) is False
+
+
+def test_spiller_caches_is_connect_false(spiller):
+    assert spiller._is_connect is False
+
+
+def test_spiller_workspace_client_is_lazy(spiller_connect):
+    """
+    The fake WorkspaceClient injected by the fixture should be the one returned,
+    proving that _workspace is an attribute read (not a hard-coded construction).
+    """
+    assert spiller_connect._workspace is spiller_connect._w

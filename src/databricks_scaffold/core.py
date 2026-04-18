@@ -60,6 +60,16 @@ class VolumeSpiller:
             self.spark.sql(f"CREATE VOLUME {self.full_name}")
             
         self._active_temp_dirs = []
+        self._is_connect = _is_databricks_connect(self.spark)
+        self._w = None
+
+    @property
+    def _workspace(self):
+        """Lazy WorkspaceClient accessor. Only built when first volume I/O happens under Connect."""
+        if self._w is None:
+            from databricks.sdk import WorkspaceClient
+            self._w = WorkspaceClient()
+        return self._w
 
     def get_path(self, name: str) -> str:
         """
