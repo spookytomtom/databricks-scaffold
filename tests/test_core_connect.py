@@ -77,3 +77,37 @@ def test_volume_rmtree_removes_nested_files_and_dir(spiller_connect):
 
 def test_volume_rmtree_is_silent_when_missing(spiller_connect):
     spiller_connect._volume_rmtree(f"{spiller_connect.volume_root}/never_existed")
+
+
+def test_upload_dir_to_volume_copies_all_parquet_files(spiller_connect, tmp_path):
+    local_src = tmp_path / "src"
+    local_src.mkdir()
+    (local_src / "part-0.parquet").write_bytes(b"A")
+    (local_src / "part-1.parquet").write_bytes(b"B")
+    (local_src / "_SUCCESS").write_bytes(b"")  # non-parquet; must be ignored
+
+    remote = f"{spiller_connect.volume_root}/uploaded"
+    spiller_connect._upload_dir_to_volume(str(local_src), remote)
+
+    assert os.path.exists(f"{remote}/part-0.parquet")
+    assert os.path.exists(f"{remote}/part-1.parquet")
+    assert not os.path.exists(f"{remote}/_SUCCESS")
+
+
+def test_download_volume_dir_copies_all_parquet_files(spiller_connect, tmp_path):
+    remote = f"{spiller_connect.volume_root}/remote"
+    os.makedirs(remote)
+    with open(f"{remote}/part-0.parquet", "wb") as f:
+        f.write(b"A")
+    with open(f"{remote}/part-1.parquet", "wb") as f:
+        f.write(b"B")
+    with open(f"{remote}/_SUCCESS", "wb") as f:
+        f.write(b"")  # non-parquet; must be ignored
+
+    local_dst = tmp_path / "dst"
+    local_dst.mkdir()
+    spiller_connect._download_volume_dir(remote, str(local_dst))
+
+    assert (local_dst / "part-0.parquet").exists()
+    assert (local_dst / "part-1.parquet").exists()
+    assert not (local_dst / "_SUCCESS").exists()
