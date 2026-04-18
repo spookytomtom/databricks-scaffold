@@ -80,7 +80,7 @@ Hardcoded — do not change without reason:
 
 ## Databricks Connect support
 
-`VolumeSpiller` works under Databricks Connect as well as on-cluster. Detection runs once at `__init__` via `_is_databricks_connect(spark)` — which imports `databricks.connect.session.DatabricksSession` and checks `isinstance`. No user action required.
+`VolumeSpiller` works under Databricks Connect as well as on-cluster. Detection runs once at `__init__` via `_is_databricks_connect(spark)`. This function checks `isinstance(spark, DatabricksSession)` **and** also checks `type(spark).__module__ == "pyspark.sql.connect.session"` — because `DatabricksSession.builder.getOrCreate()` returns a `pyspark.sql.connect.session.SparkSession`, not a `DatabricksSession` instance. No user action required.
 
 Under Databricks Connect, every operation that would otherwise touch `/Volumes/...` from local Python code is routed through the Databricks SDK Files API (`WorkspaceClient.files`). Polars writes to a local `/tmp` staging dir first, then `files.upload_from` streams the parquet up. For reads, `files.download_to` pulls parquet into `/tmp` before Polars opens it.
 

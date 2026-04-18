@@ -13,17 +13,20 @@ from databricks_scaffold._internal import _resolve_is_dev
 
 def _is_databricks_connect(spark) -> bool:
     """
-    Detects whether the given SparkSession is a Databricks Connect session.
+    Detects whether the given SparkSession is a Databricks Connect (remote) session.
 
-    Returns True only when databricks.connect is installed AND the session is an
-    instance of DatabricksSession. Returns False for plain pyspark.sql.SparkSession
-    (on-cluster or local) and when the databricks.connect package is unavailable.
+    DatabricksSession.builder.getOrCreate() returns a pyspark.sql.connect.session.SparkSession,
+    not a DatabricksSession instance. We detect this by checking the session's module.
+    Returns False for plain pyspark.sql.SparkSession (on-cluster or local) and when
+    the databricks.connect package is unavailable.
     """
     try:
         from databricks.connect.session import DatabricksSession
     except ImportError:
         return False
-    return isinstance(spark, DatabricksSession)
+    if isinstance(spark, DatabricksSession):
+        return True
+    return type(spark).__module__ == "pyspark.sql.connect.session"
 
 class VolumeSpiller:
     """
