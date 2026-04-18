@@ -26,11 +26,11 @@ class FakeFilesAPI:
             raise FileExistsError(file_path)
         shutil.copyfile(source_path, file_path)
 
-    def download_to(self, file_path, local_path, use_parallel=True, parallelism=None):
+    def download_to(self, file_path, destination, use_parallel=True, parallelism=None):
         if not os.path.exists(file_path):
             raise _FakeNotFound(file_path)
-        os.makedirs(os.path.dirname(local_path) or ".", exist_ok=True)
-        shutil.copyfile(file_path, local_path)
+        os.makedirs(os.path.dirname(destination) or ".", exist_ok=True)
+        shutil.copyfile(file_path, destination)
 
     def create_directory(self, directory_path):
         os.makedirs(directory_path, exist_ok=True)
