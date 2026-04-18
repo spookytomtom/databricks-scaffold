@@ -111,3 +111,22 @@ def test_download_volume_dir_copies_all_parquet_files(spiller_connect, tmp_path)
     assert (local_dst / "part-0.parquet").exists()
     assert (local_dst / "part-1.parquet").exists()
     assert not (local_dst / "_SUCCESS").exists()
+
+
+def test_teardown_cleans_both_local_and_volume_tracked_dirs(spiller_connect, tmp_path):
+    local_dir = tmp_path / "staging"
+    local_dir.mkdir()
+    (local_dir / "x.parquet").write_bytes(b"x")
+
+    volume_dir = f"{spiller_connect.volume_root}/spill_track"
+    os.makedirs(volume_dir)
+    with open(f"{volume_dir}/y.parquet", "wb") as f:
+        f.write(b"y")
+
+    spiller_connect._active_local_dirs.append(str(local_dir))
+    spiller_connect._active_volume_dirs.append(volume_dir)
+
+    spiller_connect.teardown()
+
+    assert not local_dir.exists()
+    assert not os.path.exists(volume_dir)
