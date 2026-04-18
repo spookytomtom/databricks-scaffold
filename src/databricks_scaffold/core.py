@@ -181,25 +181,29 @@ class VolumeSpiller:
         """
         Internal helper to resolve the base path based on the target storage tier.
 
+        For 'volume' storage, directory creation is routed through _volume_mkdirs so
+        it works under Databricks Connect (Files API) as well as on-cluster (os.makedirs).
+
         Args:
             name (str): The name of the checkpoint or folder.
             storage (str): The storage tier, either 'volume' or 'local'.
 
         Returns:
-            tuple[str, str]: A tuple containing the resolved absolute path and the storage type.
+            tuple[str, str]: (resolved absolute path, storage type)
 
         Raises:
-            ValueError: If the storage argument is not 'volume' or 'local'.
+            ValueError: If storage is not 'volume' or 'local'.
         """
         if storage not in ("volume", "local"):
             raise ValueError("storage must be 'volume' or 'local'")
 
         if storage == "volume":
             path = self.get_path(name)
+            self._volume_mkdirs(path)
         else:
             path = str(self.local_base_dir / name)
+            os.makedirs(path, exist_ok=True)
 
-        os.makedirs(path, exist_ok=True)
         return path, storage
     
     def _prepare_polars_timestamps(self, df: pl.DataFrame | pl.LazyFrame) -> pl.DataFrame | pl.LazyFrame:
