@@ -8,6 +8,48 @@ Productivity utilities for working with Polars on Databricks. Bridges the gap be
 
 ---
 
+## Databricks Connect
+
+`VolumeSpiller` works under [Databricks Connect](https://docs.databricks.com/dev-tools/databricks-connect/index.html) without any code changes — detection is automatic.
+
+**Install on your laptop (no separate `pyspark` needed):**
+
+```bash
+pip install databricks-connect==15.4.*   # match your cluster's Runtime version
+pip install git+https://github.com/spookytomtom/databricks-scaffold.git
+```
+
+`databricks-connect` bundles its own PySpark. Installing a separate `pyspark` alongside it causes version conflicts — don't do it.
+
+**Recommended session setup — works on-cluster and locally without any code changes:**
+
+```python
+try:
+    spark  # Already injected on a Databricks cluster
+except NameError:
+    from databricks.connect import DatabricksSession
+    spark = DatabricksSession.builder.getOrCreate()
+```
+
+> On a Databricks cluster `spark` is pre-injected into the notebook globals — the `except` branch never runs. Running locally via Connect, `spark` doesn't exist yet, so it's created with `DatabricksSession`. One snippet, zero environment-specific branches anywhere else in the notebook.
+
+```python
+from databricks_scaffold import VolumeSpiller
+
+IS_DEV = True
+
+spill = VolumeSpiller(spark, "main", "default", "my_spill_vol")
+
+# Works identically on-cluster and via Connect — Files API routing is automatic
+pl_df = spill.spark_to_polars(spark_df)
+```
+
+Volume operations that would otherwise require local `/Volumes/...` filesystem access are transparently routed through the Databricks SDK Files API. No code changes required between on-cluster and Connect workflows.
+
+**Works on Windows.** Staging files are written to the OS temp directory (`%TEMP%` / `TMPDIR`) rather than a hardcoded `/tmp` path.
+
+---
+
 ## What's included
 
 ### `VolumeSpiller`

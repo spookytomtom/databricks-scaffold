@@ -1,5 +1,9 @@
 docs
 databricks.yml
+AGENT.md
+.claude
+.opencode
+.vscode
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
