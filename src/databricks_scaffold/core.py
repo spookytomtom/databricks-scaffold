@@ -56,7 +56,7 @@ _logger = logging.getLogger(__name__)
 
 # Path convention:
 #   Volume paths  → f"{parent}/{name}"  (forward slash — Files API requires POSIX separators)
-#   Local paths   → os.path.join(...)   (OS-native separators, safe on Windows)
+#   Local paths   → Path(...) / part    (pathlib, works correctly on all platforms)
 
 _CONNECT_SESSION_MODULES = frozenset(
     [
@@ -272,7 +272,7 @@ class VolumeSpiller:
         are skipped for the same reason as _upload_dir_to_volume.
         Files are fetched in parallel (max 8 threads) with exponential-backoff retry.
         """
-        os.makedirs(local_dir, exist_ok=True)  # destination is always local — os.makedirs, not _volume_mkdirs
+        Path(local_dir).mkdir(parents=True, exist_ok=True)
         entries = [
             e
             for e in self._workspace.files.list_directory_contents(volume_dir)
@@ -280,7 +280,7 @@ class VolumeSpiller:
         ]
 
         def _download_one(entry) -> None:
-            dst = os.path.join(local_dir, entry.name)
+            dst = str(Path(local_dir) / entry.name)
             _retry_op(
                 lambda: self._workspace.files.download_to(
                     file_path=entry.path,
@@ -309,7 +309,7 @@ class VolumeSpiller:
         files = sorted(f for f in os.listdir(local_dir) if f.endswith(".parquet"))
 
         def _upload_one(name: str) -> None:
-            src = os.path.join(local_dir, name)
+            src = str(Path(local_dir) / name)
             dst = f"{volume_dir}/{name}"
             _retry_op(
                 lambda: self._workspace.files.upload_from(
@@ -366,7 +366,7 @@ class VolumeSpiller:
             self._volume_mkdirs(path)
         else:
             path = str(self.local_base_dir / name)
-            os.makedirs(path, exist_ok=True)
+            Path(path).mkdir(parents=True, exist_ok=True)
 
         return path, storage
 
@@ -485,7 +485,7 @@ class VolumeSpiller:
             staging_dir = tempfile.mkdtemp(prefix="ckpt_pl_")
             upload_done = False
             try:
-                local_file = os.path.join(staging_dir, "data.parquet")
+                local_file = str(Path(staging_dir) / "data.parquet")
                 if isinstance(df, pl.LazyFrame):
                     df.sink_parquet(local_file, compression=compression)
                 else:
@@ -509,7 +509,7 @@ class VolumeSpiller:
                 self._volume_mkdirs(base_path)
             else:
                 shutil.rmtree(base_path, ignore_errors=True)
-                os.makedirs(base_path, exist_ok=True)
+                Path(base_path).mkdir(parents=True, exist_ok=True)
             target_path = f"{base_path}/data.parquet"
             if isinstance(df, pl.LazyFrame):
                 df.sink_parquet(target_path, compression=compression)
@@ -571,7 +571,7 @@ class VolumeSpiller:
                 return pl.read_parquet(read_path) if eager else pl.scan_parquet(read_path)
 
         base_path = str(self.local_base_dir / name)
-        if not os.path.exists(base_path):
+        if not Path(base_path).exists():
             raise FileNotFoundError(f"Checkpoint '{name}' not found at {base_path}")
         read_path = f"{base_path}/*.parquet"
         return pl.read_parquet(read_path) if eager else pl.scan_parquet(read_path)
@@ -756,7 +756,7 @@ class VolumeSpiller:
         if self._is_connect:
             local_staging_dir = tempfile.mkdtemp(prefix="spill_pl_sp_")
             try:
-                local_file = os.path.join(local_staging_dir, "part-0.parquet")
+                local_file = str(Path(local_staging_dir) / "part-0.parquet")
                 if isinstance(df, pl.LazyFrame):
                     df.sink_parquet(local_file, compression="zstd")
                 else:
