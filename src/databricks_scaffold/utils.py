@@ -1,3 +1,4 @@
+import logging
 import re
 from typing import Any
 
@@ -8,6 +9,8 @@ from pyspark.sql import functions as F
 from pyspark.sql.types import BooleanType, DoubleType, LongType, StringType, StructField, StructType
 
 from databricks_scaffold._internal import _get_notebook_var, _resolve_is_dev
+
+_logger = logging.getLogger(__name__)
 
 
 class DataProfiler:
@@ -66,8 +69,8 @@ class DataProfiler:
         results = []
 
         if output == "print":
-            print("=== POLARS DATAFRAME PROFILE ===")
-            print(f"Shape: {total_rows} rows, {df.width} columns\n" + "=" * 40)
+            _logger.info("=== POLARS DATAFRAME PROFILE ===")
+            _logger.info("Shape: %d rows, %d columns\n%s", total_rows, df.width, "=" * 40)
 
         for col_name, dtype in df.schema.items():
             # Gather metrics
@@ -81,11 +84,18 @@ class DataProfiler:
             top_vals_str = " | ".join(freq_vals)
 
             if output == "print":
-                print(f"Column: {col_name}")
-                print(
-                    f"  Type: {dtype}\n  Missing: {null_count} ({null_pct}%)\n  Unique: {n_unique} (All Unique: {is_unique})\n  Top {self.top_n}: {top_vals_str}"
+                _logger.info("Column: %s", col_name)
+                _logger.info(
+                    "  Type: %s\n  Missing: %d (%.2f%%)\n  Unique: %d (All Unique: %s)\n  Top %d: %s",
+                    dtype,
+                    null_count,
+                    null_pct,
+                    n_unique,
+                    is_unique,
+                    self.top_n,
+                    top_vals_str,
                 )
-                print("-" * 40)
+                _logger.info("-" * 40)
             else:
                 results.append(
                     {
@@ -117,8 +127,8 @@ class DataProfiler:
         results = []
 
         if output == "print":
-            print("=== PYSPARK DATAFRAME PROFILE ===")
-            print(f"Shape: {total_rows} rows, {len(df.columns)} columns\n" + "=" * 40)
+            _logger.info("=== PYSPARK DATAFRAME PROFILE ===")
+            _logger.info("Shape: %d rows, %d columns\n%s", total_rows, len(df.columns), "=" * 40)
 
         agg_exprs = []
         for c in df.columns:
@@ -143,11 +153,17 @@ class DataProfiler:
             top_vals_str = " | ".join(freq_vals)
 
             if output == "print":
-                print(f"Column: {col_name}")
-                print(
-                    f"  Type: {dtype}\n  Missing: {null_count} ({null_pct}%)\n  Approx Unique: {n_unique}\n  Top {self.top_n}: {top_vals_str}"
+                _logger.info("Column: %s", col_name)
+                _logger.info(
+                    "  Type: %s\n  Missing: %d (%.2f%%)\n  Approx Unique: %d\n  Top %d: %s",
+                    dtype,
+                    null_count,
+                    null_pct,
+                    n_unique,
+                    self.top_n,
+                    top_vals_str,
                 )
-                print("-" * 40)
+                _logger.info("-" * 40)
             else:
                 results.append((col_name, dtype, null_count, float(null_pct), n_unique, is_unique_approx, top_vals_str))
 
@@ -179,7 +195,7 @@ def frame_shape(df: SparkDataFrame) -> tuple[int, int]:
     """
     rows = df.count()
     cols = len(df.columns)
-    print(f"Shape: ({rows}, {cols})")
+    _logger.info("Shape: (%d, %d)", rows, cols)
     return (rows, cols)
 
 
@@ -262,9 +278,9 @@ def is_unique(df: SparkDataFrame, column_name: str) -> bool:
     unique = len(duplicates) == 0
 
     if unique:
-        print(f"Column '{column_name}' is unique: yes")
+        _logger.info("Column '%s' is unique: yes", column_name)
     else:
-        print(f"Column '{column_name}' is unique: no")
+        _logger.info("Column '%s' is unique: no", column_name)
 
     return unique
 
@@ -286,8 +302,8 @@ def glimpse(df: SparkDataFrame, n: int = 5, truncate: int = 75) -> None:
     rows = df.count()
     cols = len(df.columns)
 
-    print(f"Rows: {rows}")
-    print(f"Columns: {cols}")
+    _logger.info("Rows: %d", rows)
+    _logger.info("Columns: %d", cols)
 
     if rows == 0 or cols == 0:
         return
@@ -317,7 +333,7 @@ def glimpse(df: SparkDataFrame, n: int = 5, truncate: int = 75) -> None:
         aligned_col = col_name.ljust(max_col_len)
         aligned_type = f"<{dtype}>".ljust(max_type_len + 2)  # +2 for the angle brackets
 
-        print(f"$ {aligned_col} {aligned_type} {vals_str}")
+        _logger.info("$ %s %s %s", aligned_col, aligned_type, vals_str)
 
 
 def apply_column_comments(spark: SparkSession, table_name: str, comments: dict[str, str], verbose: bool = True) -> None:
@@ -345,7 +361,7 @@ def apply_column_comments(spark: SparkSession, table_name: str, comments: dict[s
         # We access schema directly without triggering a job
         table_schema = spark.table(table_name).schema
     except Exception as e:
-        print(f"Error accessing table '{table_name}': {e}")
+        _logger.error("Error accessing table '%s': %s", table_name, e)
         return
 
     # Map existing columns to their current comments (default to empty string if None)
@@ -361,8 +377,8 @@ def apply_column_comments(spark: SparkSession, table_name: str, comments: dict[s
     # 2. Warn for existing table columns that were NOT provided in the input dict
     missing_in_input = existing_col_names.difference(input_col_names)
     if missing_in_input and verbose:
-        print(f"--- [Audit] Columns in '{table_name}' missing from input dictionary: ---")
-        print(f"{', '.join(sorted(missing_in_input))}\n")
+        _logger.warning("--- [Audit] Columns in '%s' missing from input dictionary: ---", table_name)
+        _logger.warning("%s\n", ", ".join(sorted(missing_in_input)))
 
     # Track operations for summary
     updated_count = 0
@@ -376,12 +392,12 @@ def apply_column_comments(spark: SparkSession, table_name: str, comments: dict[s
         # CONDITION A: Check if input is "empty" (per requirement)
         if new_comment == "":
             if verbose:
-                print(f"Skipping '{col}': Input comment is empty.")
+                _logger.info("Skipping '%s': Input comment is empty.", col)
             continue
 
         # CONDITION B: Check if column actually exists in table
         if col not in existing_col_names:
-            print(f"!! Warning: Column '{col}' defined in comments but NOT found in table '{table_name}'")
+            _logger.warning("Column '%s' defined in comments but NOT found in table '%s'", col, table_name)
             continue
 
         # CONDITION C: Compare New vs Old (The optimization)
@@ -395,7 +411,7 @@ def apply_column_comments(spark: SparkSession, table_name: str, comments: dict[s
 
         # If we reach here, we need to update
         if verbose:
-            print(f"Updating '{col}': \n   Old: '{current_comment}' \n   New: '{new_comment}'")
+            _logger.info("Updating '%s': \n   Old: '%s' \n   New: '%s'", col, current_comment, new_comment)
 
         # Escape single quotes for SQL safety
         escaped_comment = new_comment.replace("'", "''")
@@ -409,10 +425,10 @@ def apply_column_comments(spark: SparkSession, table_name: str, comments: dict[s
             spark.sql(sql)
             updated_count += 1
         except Exception as e:
-            print(f"Failed to update column '{col}': {str(e)}")
+            _logger.error("Failed to update column '%s': %s", col, e)
 
     if verbose:
-        print(f"\n--- Done. Updated: {updated_count} | Skipped (No Change): {skipped_count} ---")
+        _logger.info("\n--- Done. Updated: %d | Skipped (No Change): %d ---", updated_count, skipped_count)
 
 
 def display2(df: Any, is_dev: bool | None = None) -> None:
@@ -429,7 +445,7 @@ def display2(df: Any, is_dev: bool | None = None) -> None:
     is_dev = _resolve_is_dev(is_dev)
 
     if not is_dev:
-        print("Skipping display (IS_DEV is False or not found).")
+        _logger.info("Skipping display (IS_DEV is False or not found).")
         return
 
     # 2. Get the true Databricks display function
@@ -452,13 +468,13 @@ def display2(df: Any, is_dev: bool | None = None) -> None:
             display_func(display_target)
             return  # Success!
         except Exception as e:
-            print(f"Databricks display() failed: {e}. Falling back...")
+            _logger.warning("Databricks display() failed: %s. Falling back...", e)
 
     # If we reach here, we are probably testing locally (e.g., in pytest)
     # where Databricks widgets don't exist.
     if hasattr(df, "show"):
         df.show()
     elif hasattr(df, "glimpse"):
-        print(df.glimpse())
+        _logger.info(df.glimpse())
     else:
-        print(df)
+        _logger.info("%s", df)

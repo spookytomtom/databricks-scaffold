@@ -386,13 +386,13 @@ class VolumeSpiller:
                 if dtype.time_unit in ("ns", "us"):
                     expr = expr.dt.cast_time_unit("ms")
                     modified = True
-                    print(f"⏰ Auto-fix: Casting '{col_name}' from {dtype.time_unit} to ms.")
+                    _logger.info("Auto-fix: Casting '%s' from %s to ms.", col_name, dtype.time_unit)
 
                 # 2. Fix timezone: Add UTC to prevent timestamp_ntz in Spark
                 if dtype.time_zone is None:
                     expr = expr.dt.replace_time_zone("UTC")
                     modified = True
-                    print(f"🌍 Auto-fix: Adding UTC timezone to '{col_name}' to avoid timestamp_ntz.")
+                    _logger.info("Auto-fix: Adding UTC timezone to '%s' to avoid timestamp_ntz.", col_name)
 
                 if modified:
                     exprs.append(expr)
@@ -508,8 +508,12 @@ class VolumeSpiller:
             else:
                 df.write_parquet(target_path, compression=compression)
 
-        prefix = "⚡ Local" if resolved_storage == "local" else "✅ Volume"
-        print(f"{prefix} checkpoint '{name}' written using {compression} compression.")
+        _logger.info(
+            "%s checkpoint '%s' written using %s compression.",
+            resolved_storage.capitalize(),
+            name,
+            compression,
+        )
 
     def load_checkpoint_pl(self, name: str, eager: bool = True, storage: str = "volume") -> pl.DataFrame | pl.LazyFrame:
         """
@@ -599,7 +603,7 @@ class VolumeSpiller:
 
         # Hardcoding zstd since this explicitly saves to the Volume
         df.write.mode("overwrite").option("compression", "zstd").parquet(checkpoint_dir)
-        print(f"✅ Spark checkpoint '{name}' written to UC Volume using zstd compression.")
+        _logger.info("Spark checkpoint '%s' written to UC Volume using zstd compression.", name)
 
     def load_checkpoint_spark(self, name: str) -> SparkDataFrame:
         """
@@ -644,7 +648,7 @@ class VolumeSpiller:
         self._torn_down = True
         if self.local_base_dir.exists():
             shutil.rmtree(self.local_base_dir, ignore_errors=True)
-            print(f"🧹 LOCAL CLEANUP: Cleared driver temp directory {self.local_base_dir}")
+            _logger.info("Local cleanup: cleared driver temp directory %s", self.local_base_dir)
 
         for d in self._active_local_dirs:
             shutil.rmtree(d, ignore_errors=True)
@@ -655,10 +659,10 @@ class VolumeSpiller:
         self._active_volume_dirs.clear()
 
         if self.is_dev:
-            print(f"🛠️ DEV MODE: Volume data preserved at {self.volume_root}")
+            _logger.info("Dev mode: volume data preserved at %s", self.volume_root)
         else:
             self.spark.sql(f"DROP VOLUME IF EXISTS {self.full_name}")
-            print(f"🗑️ PROD MODE: Volume {self.full_name} dropped.")
+            _logger.info("Prod mode: volume %s dropped.", self.full_name)
 
     def spark_to_polars(
         self, df: SparkDataFrame, cleanup: bool = False, eager: bool = True, optimize_files: bool = False
