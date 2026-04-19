@@ -1,8 +1,8 @@
 # Import the logic
-import polars as pl
+import polars as pl  # noqa: F401 — re-exported for users
 
 # Import types for aliasing
-from pyspark.sql import DataFrame as SparkDataFrame
+from pyspark.sql import DataFrame as SparkDataFrame  # noqa: F401 — re-exported for users
 
 from .core import VolumeSpiller
 from .utils import (

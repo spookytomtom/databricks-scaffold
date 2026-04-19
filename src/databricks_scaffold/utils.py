@@ -1,5 +1,5 @@
 import re
-from typing import Any, Dict
+from typing import Any
 
 import polars as pl
 from pyspark.sql import DataFrame as SparkDataFrame
@@ -320,7 +320,7 @@ def glimpse(df: SparkDataFrame, n: int = 5, truncate: int = 75) -> None:
         print(f"$ {aligned_col} {aligned_type} {vals_str}")
 
 
-def apply_column_comments(spark: SparkSession, table_name: str, comments: Dict[str, str], verbose: bool = True) -> None:
+def apply_column_comments(spark: SparkSession, table_name: str, comments: dict[str, str], verbose: bool = True) -> None:
     """
     Applies column comments to a specified table only if the comment has changed.
 
