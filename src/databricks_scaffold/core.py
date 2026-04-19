@@ -193,7 +193,7 @@ class VolumeSpiller:
         self._is_connect = _is_databricks_connect(self.spark)
         self._active_local_dirs: list[str] = []
         self._active_volume_dirs: list[str] = []
-        self._w = workspace_client
+        self._workspace_client = workspace_client
         self._torn_down = False
         if self.is_dev:
             atexit.register(self.teardown)
@@ -201,11 +201,11 @@ class VolumeSpiller:
     @property
     def _workspace(self):
         """Lazy WorkspaceClient accessor. Only built when first volume I/O happens under Connect."""
-        if self._w is None:
+        if self._workspace_client is None:
             from databricks.sdk import WorkspaceClient
 
-            self._w = WorkspaceClient()
-        return self._w
+            self._workspace_client = WorkspaceClient()
+        return self._workspace_client
 
     def _volume_mkdirs(self, volume_path: str) -> None:
         """Create a directory on the volume (idempotent). Routes via Files API under Connect."""

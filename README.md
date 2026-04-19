@@ -219,7 +219,7 @@ Works on both Polars and Spark. Auto-detects the type.
 ```python
 from databricks_scaffold import DataProfiler
 
-profiler = DataProfiler(top_n_freq=5)
+profiler = DataProfiler(top_n=5)
 
 # Printed summary
 profiler.profile(spark_df)
