@@ -53,7 +53,7 @@ def test_spiller_workspace_client_is_lazy(spiller_connect):
     The fake WorkspaceClient injected by the fixture should be the one returned,
     proving that _workspace is an attribute read (not a hard-coded construction).
     """
-    assert spiller_connect._workspace is spiller_connect._w
+    assert spiller_connect._workspace is spiller_connect._workspace_client
 
 
 
@@ -271,7 +271,7 @@ def test_save_checkpoint_pl_upload_failure_preserves_old_checkpoint(spiller_conn
     def _fail(*args, **kwargs):
         raise RuntimeError("simulated network error")
 
-    monkeypatch.setattr(spiller_connect._w.files, "upload_from", _fail)
+    monkeypatch.setattr(spiller_connect._workspace_client.files, "upload_from", _fail)
 
     with pytest.raises(RuntimeError, match="simulated network error"):
         spiller_connect.save_checkpoint_pl(df_new, name="ckpt_c4", storage="volume")
@@ -434,7 +434,7 @@ def test_upload_dir_retries_on_transient_error(spiller_connect, tmp_path, monkey
     (local_src / "part-0.parquet").write_bytes(b"data")
 
     attempt_counts = {"n": 0}
-    real_upload = spiller_connect._w.files.upload_from
+    real_upload = spiller_connect._workspace_client.files.upload_from
 
     def flaky_upload(*args, **kwargs):
         attempt_counts["n"] += 1
@@ -442,7 +442,7 @@ def test_upload_dir_retries_on_transient_error(spiller_connect, tmp_path, monkey
             raise ResourceExhausted("rate limited")
         return real_upload(*args, **kwargs)
 
-    monkeypatch.setattr(spiller_connect._w.files, "upload_from", flaky_upload)
+    monkeypatch.setattr(spiller_connect._workspace_client.files, "upload_from", flaky_upload)
 
     remote = f"{spiller_connect.volume_root}/retry_upload"
     spiller_connect._upload_dir_to_volume(str(local_src), remote)
@@ -464,7 +464,7 @@ def test_upload_dir_raises_after_exhausted_retries(spiller_connect, tmp_path, mo
     def always_fails(*args, **kwargs):
         raise ResourceExhausted("always fails")
 
-    monkeypatch.setattr(spiller_connect._w.files, "upload_from", always_fails)
+    monkeypatch.setattr(spiller_connect._workspace_client.files, "upload_from", always_fails)
 
     remote = f"{spiller_connect.volume_root}/retry_exhausted"
     with pytest.raises(ResourceExhausted):

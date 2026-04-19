@@ -19,15 +19,15 @@ class DataProfiler:
     including missing values, unique counts, and top frequent values.
     """
 
-    def __init__(self, top_n_freq: int = 3) -> None:
+    def __init__(self, top_n: int = 3) -> None:
         """
         Initializes the DataProfiler.
 
         Args:
-            top_n_freq (int, optional): Number of most frequent values to track per column.
-                                        Defaults to 3.
+            top_n (int, optional): Number of most frequent values to track per column.
+                                    Defaults to 3.
         """
-        self.top_n = top_n_freq
+        self.top_n = top_n
 
     def profile(self, df: pl.DataFrame | SparkDataFrame, output: str = "print") -> pl.DataFrame | SparkDataFrame | None:
         """
