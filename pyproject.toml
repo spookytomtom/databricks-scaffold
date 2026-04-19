@@ -19,11 +19,11 @@ classifiers = [
   "Programming Language :: Python :: 3",
 ]
 
-# Dependencies that will be installed automatically
+# databricks-connect bundles pyspark — do not declare pyspark or databricks-sdk here
 dependencies = [
   "polars>=1.38.1",
-  "pyspark>=3.4.0",
 ]
+
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0",

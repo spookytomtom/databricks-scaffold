@@ -1,6 +1,7 @@
 import polars as pl
 import pytest
 from datetime import datetime
+from databricks_scaffold.core import VolumeSpiller
 
 def test_initialization(spiller):
     """Test if directories are correctly set up."""
@@ -43,6 +44,7 @@ def test_nanosecond_autofix(spiller, capsys):
     dtype = loaded.schema["ts"]
     assert dtype != pl.Datetime("ns")
 
+@pytest.mark.requires_pyspark
 def test_spark_to_polars_conversion(spiller, spark):
     """Test moving data from Spark to Polars."""
     spark_df = spark.createDataFrame([(1, "foo"), (2, "bar")], ["id", "txt"])
@@ -54,6 +56,7 @@ def test_spark_to_polars_conversion(spiller, spark):
     assert pl_df.shape == (2, 2)
     assert pl_df.filter(pl.col("id") == 1)["txt"][0] == "foo"
 
+@pytest.mark.requires_pyspark
 def test_polars_to_spark_conversion(spiller):
     """Test moving data from Polars to Spark."""
     pl_df = pl.DataFrame({
@@ -71,6 +74,23 @@ def test_polars_to_spark_conversion(spiller):
 def test_error_handling_invalid_storage(spiller):
     """Test that invalid storage options raise errors."""
     df = pl.DataFrame({"a": [1]})
-    
+
     with pytest.raises(ValueError, match="storage must be"):
         spiller.save_checkpoint_pl(df, "bad_store", storage="cloud")
+
+
+def test_is_dev_default_arg_uses_resolved_value_not_raw_param(spark, monkeypatch):
+    """Regression: VolumeSpiller(spark, ...) with no is_dev kwarg must not issue DROP VOLUME
+    even when _resolve_is_dev returns True (simulating IS_DEV=True in notebook namespace)."""
+    import databricks_scaffold.core as core_mod
+
+    monkeypatch.setattr(core_mod, "_resolve_is_dev", lambda _: True)
+
+    spiller = VolumeSpiller(spark=spark, catalog="c", schema="s", volume_name="v")
+    assert spiller.is_dev is True
+
+    drop_calls = [
+        str(call) for call in spark.sql.call_args_list
+        if "DROP VOLUME" in str(call)
+    ]
+    assert drop_calls == [], f"DROP VOLUME was issued despite is_dev=True: {drop_calls}"

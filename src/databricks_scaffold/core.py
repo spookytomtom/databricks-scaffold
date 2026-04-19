@@ -1,39 +1,123 @@
+import atexit
 import uuid
 import shutil
 import tempfile
 import os
 import glob
 import functools
+import logging
+import random
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import polars as pl
 from pyspark.sql import DataFrame as SparkDataFrame, SparkSession
+
+try:
+    from pyspark.sql.connect.dataframe import DataFrame as ConnectDataFrame
+    _DF_TYPES = (SparkDataFrame, ConnectDataFrame)
+except ImportError:
+    ConnectDataFrame = None  # type: ignore[assignment,misc]
+    _DF_TYPES = (SparkDataFrame,)
+
+try:
+    from databricks.sdk.errors import NotFound as _SdkNotFound
+except ImportError:
+    class _SdkNotFound(Exception):  # type: ignore[assignment]
+        pass
+
+try:
+    from databricks.sdk.errors import (
+        ResourceExhausted as _SdkResourceExhausted,  # 429 — API rate limit
+        InternalError as _SdkInternalError,           # 5xx — transient server error
+    )
+    # Only these two are worth retrying; auth errors (403) and missing paths (404)
+    # won't fix themselves with time and should surface immediately.
+    _RETRYABLE_SDK_ERRORS: tuple = (_SdkResourceExhausted, _SdkInternalError)
+except ImportError:
+    _RETRYABLE_SDK_ERRORS = ()
+
 import getpass
 from pathlib import Path
 import re
 from databricks_scaffold._internal import _resolve_is_dev
 
+_logger = logging.getLogger(__name__)
+
+# Path convention:
+#   Volume paths  → f"{parent}/{name}"  (forward slash — Files API requires POSIX separators)
+#   Local paths   → os.path.join(...)   (OS-native separators, safe on Windows)
+
+_CONNECT_SESSION_MODULES = frozenset([
+    "pyspark.sql.connect.session",
+    "databricks.connect.session",
+])
+
 def _is_databricks_connect(spark) -> bool:
     """
     Detects whether the given SparkSession is a Databricks Connect (remote) session.
 
-    DatabricksSession.builder.getOrCreate() returns a pyspark.sql.connect.session.SparkSession,
-    not a DatabricksSession instance. We detect this by checking the session's module.
-    Returns False for plain pyspark.sql.SparkSession (on-cluster or local) and when
-    the databricks.connect package is unavailable.
+    Uses three checks in order:
+    1. isinstance against DatabricksSession (when the package is importable).
+    2. Module-name match against known Connect session module paths.
+    3. Presence of a `client` attribute that Connect sessions carry.
+
+    Returns False only when none of the checks match. Logs a warning when
+    databricks.connect is importable but all checks still fail, which indicates
+    an unexpected Databricks API change.
     """
+    module = type(spark).__module__
+
+    # Check 2: module-name match (fast, no import needed).
+    if module in _CONNECT_SESSION_MODULES:
+        return True
+
+    # Check 1: isinstance — requires the package to be present.
     try:
         from databricks.connect.session import DatabricksSession
+        if isinstance(spark, DatabricksSession):
+            return True
+        # Check 3: structural duck-type — Connect sessions expose a gRPC client.
+        if getattr(spark, "client", None) is not None or getattr(spark, "_client", None) is not None:
+            _logger.warning(
+                "databricks.connect is installed but session module %r did not match "
+                "known paths and isinstance check failed. Treating as Connect session. "
+                "This may indicate a Databricks API change — please report it.",
+                module,
+            )
+            return True
+        return False
     except ImportError:
         return False
-    if isinstance(spark, DatabricksSession):
-        return True
-    return type(spark).__module__ == "pyspark.sql.connect.session"
+
+def _retry_op(fn, max_retries: int = 5, base_delay: float = 0.5):
+    """Retry fn() with exponential back-off on rate-limit / server errors."""
+    for attempt in range(max_retries):
+        try:
+            return fn()
+        except Exception as exc:
+            if not _RETRYABLE_SDK_ERRORS or not isinstance(exc, _RETRYABLE_SDK_ERRORS):
+                raise
+            if attempt == max_retries - 1:
+                raise
+            # Jitter prevents multiple parallel threads from retrying in lockstep
+            # and hammering the API again as a synchronized wave.
+            time.sleep(base_delay * (2 ** attempt) + random.uniform(0, 0.1))
+
 
 class VolumeSpiller:
     """
     A utility class to manage data spilling and checkpointing between PySpark and Polars
     using Databricks Unity Catalog Volumes and local driver storage.
     """
-    def __init__(self, spark: SparkSession, catalog: str, schema: str, volume_name: str, is_dev: bool = None):
+    def __init__(
+        self,
+        spark: SparkSession,
+        catalog: str,
+        schema: str,
+        volume_name: str,
+        is_dev: bool = None,
+        workspace_client=None,
+    ):
         """
         Initializes the VolumeSpiller, setting up paths and managing the underlying UC Volume.
 
@@ -46,27 +130,52 @@ class VolumeSpiller:
                                      If False (Prod), drops and recreates the volume for a clean slate.
                                      If not provided, reads IS_DEV from the notebook namespace.
                                      Defaults to True if IS_DEV is not set anywhere.
+            workspace_client (WorkspaceClient, optional): A pre-constructed
+                ``databricks.sdk.WorkspaceClient`` instance to use for all Files API
+                calls under Databricks Connect.  Pass this when the default
+                ``WorkspaceClient()`` zero-argument constructor would not pick up the
+                right credentials — e.g. when using a non-default ``.databrickscfg``
+                profile, a custom host, PAT token, or an OAuth credential already in
+                scope.  If *None* (default), a ``WorkspaceClient()`` is constructed
+                lazily on the first volume I/O under Connect, relying on the SDK's
+                standard environment-variable / config-file auth chain.
+
+                Example — using a named profile::
+
+                    from databricks.sdk import WorkspaceClient
+                    wc = WorkspaceClient(profile="my-profile")
+                    spill = VolumeSpiller(spark, cat, sch, vol, workspace_client=wc)
         """
         self.spark = spark if spark else SparkSession.builder.getOrCreate()
         self.is_dev = _resolve_is_dev(is_dev)
         self.full_name = f"{catalog}.{schema}.{volume_name}"
         self.volume_root = f"/Volumes/{catalog}/{schema}/{volume_name}"
-        user = getpass.getuser()
-        self.local_base_dir = Path(f"/tmp/{user}/spill")
+        user = getpass.getuser().replace("\\", "_").replace("/", "_")
+        self.local_base_dir = Path(tempfile.gettempdir()) / "databricks-scaffold" / user
         self.local_base_dir.mkdir(parents=True, exist_ok=True)
         
-        if is_dev:
-            # In Dev, we just want to make sure it exists so we don't lose data
-            self.spark.sql(f"CREATE VOLUME IF NOT EXISTS {self.full_name}")
-        else:
-            # In Prod, we want a clean slate, so we drop then create
-            self.spark.sql(f"DROP VOLUME IF EXISTS {self.full_name}")
-            self.spark.sql(f"CREATE VOLUME {self.full_name}")
+        try:
+            if self.is_dev:
+                self.spark.sql(f"CREATE VOLUME IF NOT EXISTS {self.full_name}")
+            else:
+                self.spark.sql(f"DROP VOLUME IF EXISTS {self.full_name}")
+                self.spark.sql(f"CREATE VOLUME {self.full_name}")
+        except Exception as exc:
+            if self._is_connect:
+                raise RuntimeError(
+                    f"Failed to initialise volume {self.full_name!r} via Databricks Connect. "
+                    "Is your Connect cluster started? "
+                    f"(original error: {exc})"
+                ) from exc
+            raise
             
+        self._is_connect = _is_databricks_connect(self.spark)
         self._active_local_dirs: list[str] = []
         self._active_volume_dirs: list[str] = []
-        self._is_connect = _is_databricks_connect(self.spark)
-        self._w = None
+        self._w = workspace_client
+        self._torn_down = False
+        if self.is_dev:
+            atexit.register(self.teardown)
 
     @property
     def _workspace(self):
@@ -89,7 +198,7 @@ class VolumeSpiller:
             try:
                 self._workspace.files.get_directory_metadata(volume_path)
                 return True
-            except Exception:
+            except _SdkNotFound:
                 return False
         return os.path.exists(volume_path)
 
@@ -97,12 +206,12 @@ class VolumeSpiller:
         """List entry names in a volume directory. Returns [] for missing directory."""
         if self._is_connect:
             try:
-                return [e.name for e in self._workspace.files.list_directory_contents(volume_path)]
-            except Exception:
+                return sorted(e.name for e in self._workspace.files.list_directory_contents(volume_path))
+            except _SdkNotFound:
                 return []
         if not os.path.exists(volume_path):
             return []
-        return os.listdir(volume_path)
+        return sorted(os.listdir(volume_path))
 
     def _volume_rmtree(self, volume_path: str) -> None:
         """
@@ -117,7 +226,7 @@ class VolumeSpiller:
 
         try:
             entries = list(self._workspace.files.list_directory_contents(volume_path))
-        except Exception:
+        except _SdkNotFound:
             return  # directory doesn't exist — nothing to do
 
         for entry in entries:
@@ -126,47 +235,70 @@ class VolumeSpiller:
             else:
                 try:
                     self._workspace.files.delete(entry.path)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    _logger.warning("Failed to delete %s: %s", entry.path, exc)
         try:
             self._workspace.files.delete_directory(volume_path)
-        except Exception:
-            pass
+        except _SdkNotFound:
+            pass  # already gone — ok
 
     def _download_volume_dir(self, volume_dir: str, local_dir: str) -> None:
         """
         Download every *.parquet file in volume_dir to local_dir. Non-parquet files
         are skipped for the same reason as _upload_dir_to_volume.
+        Files are fetched in parallel (max 8 threads) with exponential-backoff retry.
         """
-        os.makedirs(local_dir, exist_ok=True)
-        for entry in self._workspace.files.list_directory_contents(volume_dir):
-            if entry.is_directory or not entry.name.endswith(".parquet"):
-                continue
+        os.makedirs(local_dir, exist_ok=True)  # destination is always local — os.makedirs, not _volume_mkdirs
+        entries = [
+            e for e in self._workspace.files.list_directory_contents(volume_dir)
+            if not e.is_directory and e.name.endswith(".parquet")
+        ]
+
+        def _download_one(entry) -> None:
             dst = os.path.join(local_dir, entry.name)
-            self._workspace.files.download_to(
+            _retry_op(lambda: self._workspace.files.download_to(
                 file_path=entry.path,
                 destination=dst,
                 use_parallel=True,
-            )
+            ))
+
+        # max_workers=8 balances throughput vs. rate-limit pressure; more threads
+        # increase 429 risk on the Files API.  as_completed + result() gives
+        # fail-fast: the first upload failure surfaces immediately rather than
+        # after all remaining files finish.
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            futures = {executor.submit(_download_one, e): e.name for e in entries}
+            for future in as_completed(futures):
+                future.result()
 
     def _upload_dir_to_volume(self, local_dir: str, volume_dir: str) -> None:
         """
         Upload every *.parquet file in local_dir to volume_dir. Non-parquet files
         (_SUCCESS, .crc) are skipped — they are Spark-side artifacts that Polars
         doesn't need and that the round-trip shouldn't propagate.
+        Files are uploaded in parallel (max 8 threads) with exponential-backoff retry.
         """
         self._volume_mkdirs(volume_dir)
-        for name in os.listdir(local_dir):
-            if not name.endswith(".parquet"):
-                continue
+        files = sorted(f for f in os.listdir(local_dir) if f.endswith(".parquet"))
+
+        def _upload_one(name: str) -> None:
             src = os.path.join(local_dir, name)
             dst = f"{volume_dir}/{name}"
-            self._workspace.files.upload_from(
+            _retry_op(lambda: self._workspace.files.upload_from(
                 file_path=dst,
                 source_path=src,
                 overwrite=True,
                 use_parallel=True,
-            )
+            ))
+
+        # Same rationale as _download_volume_dir: 8 threads, fail-fast on first
+        # error.  Fail-fast matters here because the old checkpoint is already
+        # deleted before this upload starts — a silent partial write would leave
+        # the user with no recoverable checkpoint.
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            futures = {executor.submit(_upload_one, name): name for name in files}
+            for future in as_completed(futures):
+                future.result()
 
     def get_path(self, name: str) -> str:
         """
@@ -328,25 +460,39 @@ class VolumeSpiller:
         if compression == "auto":
             compression = "zstd" if resolved_storage == "volume" else "snappy"
 
-        if resolved_storage == "volume":
-            self._volume_rmtree(base_path)
-            self._volume_mkdirs(base_path)
-        else:
-            shutil.rmtree(base_path, ignore_errors=True)
-            os.makedirs(base_path, exist_ok=True)
-
         if resolved_storage == "volume" and self._is_connect:
+            # Write-then-swap: keep old checkpoint intact until new data is fully staged.
+            # Files API has no atomic rename, so we upload to a sibling tmp path first,
+            # then delete old, then promote tmp → final using the still-live local staging.
+            # If upload to tmp fails: old checkpoint untouched (tmp cleaned in except).
+            # If final upload fails: old is gone but tmp retains complete data for recovery.
+            tmp_volume_path = f"{base_path}.__new.{uuid.uuid4().hex}"
             staging_dir = tempfile.mkdtemp(prefix="ckpt_pl_")
+            upload_done = False
             try:
                 local_file = os.path.join(staging_dir, "data.parquet")
                 if isinstance(df, pl.LazyFrame):
                     df.sink_parquet(local_file, compression=compression)
                 else:
                     df.write_parquet(local_file, compression=compression)
+                self._upload_dir_to_volume(staging_dir, tmp_volume_path)
+                upload_done = True
+                self._volume_rmtree(base_path)
                 self._upload_dir_to_volume(staging_dir, base_path)
+                self._volume_rmtree(tmp_volume_path)
+            except Exception:
+                if not upload_done:
+                    self._volume_rmtree(tmp_volume_path)
+                raise
             finally:
                 shutil.rmtree(staging_dir, ignore_errors=True)
         else:
+            if resolved_storage == "volume":
+                self._volume_rmtree(base_path)
+                self._volume_mkdirs(base_path)
+            else:
+                shutil.rmtree(base_path, ignore_errors=True)
+                os.makedirs(base_path, exist_ok=True)
             target_path = f"{base_path}/data.parquet"
             if isinstance(df, pl.LazyFrame):
                 df.sink_parquet(target_path, compression=compression)
@@ -426,7 +572,7 @@ class VolumeSpiller:
         Raises:
             TypeError: If arguments are of incorrect types.
         """
-        if not isinstance(df, SparkDataFrame):
+        if not isinstance(df, _DF_TYPES):
             raise TypeError(f"df must be a pyspark.sql.DataFrame, got {type(df).__name__}")
 
         if not isinstance(name, str):
@@ -476,12 +622,22 @@ class VolumeSpiller:
             raise FileNotFoundError(f"Checkpoint '{name}' not found at {checkpoint_dir}")
         return self.spark.read.parquet(checkpoint_dir)
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.teardown()
+        return False
+
     def teardown(self) -> None:
         """
         Cleans up local driver temp dirs and UC Volume state. In Dev mode, volume
         root is preserved; in Prod, it is dropped. Under Databricks Connect, volume
         cleanup goes through the Files API.
         """
+        if self._torn_down:
+            return
+        self._torn_down = True
         if self.local_base_dir.exists():
             shutil.rmtree(self.local_base_dir, ignore_errors=True)
             print(f"🧹 LOCAL CLEANUP: Cleared driver temp directory {self.local_base_dir}")
