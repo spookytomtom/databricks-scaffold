@@ -56,7 +56,6 @@ def test_spiller_workspace_client_is_lazy(spiller_connect):
     assert spiller_connect._workspace is spiller_connect._workspace_client
 
 
-
 def test_volume_mkdirs_uses_files_api_under_connect(spiller_connect):
     target = f"{spiller_connect.volume_root}/new_dir/nested"
     spiller_connect._volume_mkdirs(target)
@@ -158,7 +157,6 @@ def test_teardown_cleans_both_local_and_volume_tracked_dirs(spiller_connect, tmp
 
     assert not local_dir.exists()
     assert not os.path.exists(volume_dir)
-
 
 
 @pytest.mark.requires_pyspark
