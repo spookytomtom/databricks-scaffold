@@ -10,6 +10,7 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from typing import Any, Callable
 
 import polars as pl
 from pyspark.sql import DataFrame as SparkDataFrame
@@ -24,10 +25,14 @@ except ImportError:
     _DF_TYPES = (SparkDataFrame,)
 
 try:
+    from databricks.sdk import WorkspaceClient
     from databricks.sdk.errors import NotFound as _SdkNotFound
 except ImportError:
 
     class _SdkNotFound(Exception):  # type: ignore[assignment]
+        pass
+
+    class WorkspaceClient:  # type: ignore[assignment]
         pass
 
 
@@ -100,7 +105,7 @@ def _is_databricks_connect(spark) -> bool:
         return False
 
 
-def _retry_op(fn, max_retries: int = 5, base_delay: float = 0.5):
+def _retry_op(fn: Callable[[], Any], max_retries: int = 5, base_delay: float = 0.5) -> Any:
     """Retry fn() with exponential back-off on rate-limit / server errors."""
     for attempt in range(max_retries):
         try:
@@ -127,8 +132,8 @@ class VolumeSpiller:
         catalog: str,
         schema: str,
         volume_name: str,
-        is_dev: bool = None,
-        workspace_client=None,
+        is_dev: bool | None = None,
+        workspace_client: WorkspaceClient | None = None,
     ):
         """
         Initializes the VolumeSpiller, setting up paths and managing the underlying UC Volume.
