@@ -111,6 +111,8 @@ def _retry_op(fn: Callable[[], Any], max_retries: int = 5, base_delay: float = 0
         try:
             return fn()
         except Exception as exc:
+            # Retry wrapper — catch all to inspect whether error is transient (rate-limit / 5xx)
+            # or non-retryable (auth, not-found, etc.) and re-raise accordingly.
             if not _RETRYABLE_SDK_ERRORS or not isinstance(exc, _RETRYABLE_SDK_ERRORS):
                 raise
             if attempt == max_retries - 1:
@@ -178,6 +180,8 @@ class VolumeSpiller:
                 self.spark.sql(f"DROP VOLUME IF EXISTS {self.full_name}")
                 self.spark.sql(f"CREATE VOLUME {self.full_name}")
         except Exception as exc:
+            # Volume init — catch all to provide a Connect-specific error message
+            # while re-raising the raw exception for on-cluster mode.
             if self._is_connect:
                 raise RuntimeError(
                     f"Failed to initialise volume {self.full_name!r} via Databricks Connect. "
@@ -254,6 +258,8 @@ class VolumeSpiller:
                 try:
                     self._workspace.files.delete(entry.path)
                 except Exception as exc:
+                    # Recursive delete — log and continue so a single file failure
+                    # doesn't abort cleanup of the rest of the directory tree.
                     _logger.warning("Failed to delete %s: %s", entry.path, exc)
         try:
             self._workspace.files.delete_directory(volume_path)
@@ -490,6 +496,8 @@ class VolumeSpiller:
                 self._upload_dir_to_volume(staging_dir, base_path)
                 self._volume_rmtree(tmp_volume_path)
             except Exception:
+                # Checkpoint save — if anything goes wrong, clean up tmp volume path
+                # (only if upload didn't complete) and re-raise to caller.
                 if not upload_done:
                     self._volume_rmtree(tmp_volume_path)
                 raise

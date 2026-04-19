@@ -361,6 +361,8 @@ def apply_column_comments(spark: SparkSession, table_name: str, comments: dict[s
         # We access schema directly without triggering a job
         table_schema = spark.table(table_name).schema
     except Exception as e:
+        # Table access failure — cannot proceed without schema, so log and return
+        # silently rather than crashing the caller's workflow.
         _logger.error("Error accessing table '%s': %s", table_name, e)
         return
 
@@ -425,6 +427,8 @@ def apply_column_comments(spark: SparkSession, table_name: str, comments: dict[s
             spark.sql(sql)
             updated_count += 1
         except Exception as e:
+            # Individual column update failure — log and continue so remaining
+            # columns still get their comments applied.
             _logger.error("Failed to update column '%s': %s", col, e)
 
     if verbose:
@@ -468,6 +472,8 @@ def display2(df: Any, is_dev: bool | None = None) -> None:
             display_func(display_target)
             return  # Success!
         except Exception as e:
+            # Databricks display() may fail outside notebook context (e.g. pytest);
+            # log and fall back to local rendering rather than crashing.
             _logger.warning("Databricks display() failed: %s. Falling back...", e)
 
     # If we reach here, we are probably testing locally (e.g., in pytest)
