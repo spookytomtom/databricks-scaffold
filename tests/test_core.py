@@ -1,3 +1,5 @@
+# Fixtures used: spiller (VolumeSpiller with local temp dir), spark (pyspark.sql.SparkSession),
+# monkeypatch (pytest built-in), capsys (pytest built-in)
 from datetime import datetime
 
 import polars as pl
@@ -79,7 +81,7 @@ def test_error_handling_invalid_storage(spiller):
         spiller.save_checkpoint_pl(df, "bad_store", storage="cloud")
 
 
-def test_is_dev_default_arg_uses_resolved_value_not_raw_param(spark, monkeypatch):
+def test_is_dev_default_arg_uses_resolved_value(spark, monkeypatch):
     """Regression: VolumeSpiller(spark, ...) with no is_dev kwarg must not issue DROP VOLUME
     even when _resolve_is_dev returns True (simulating IS_DEV=True in notebook namespace)."""
     import databricks_scaffold.core as core_mod
