@@ -1,21 +1,27 @@
 import re
-from pyspark.sql import DataFrame as SparkDataFrame, functions as F, Window, SparkSession
-from pyspark.sql.types import StructType, StructField, StringType, LongType, DoubleType, BooleanType
-from typing import Dict, Any
+from typing import Any, Dict
+
 import polars as pl
+from pyspark.sql import DataFrame as SparkDataFrame
+from pyspark.sql import SparkSession
+from pyspark.sql import functions as F
+from pyspark.sql.types import BooleanType, DoubleType, LongType, StringType, StructField, StructType
+
 from databricks_scaffold._internal import _get_notebook_var, _resolve_is_dev
+
 
 class DataProfiler:
     """
-    A utility class for generating summary profiles of Polars and PySpark DataFrames, 
+    A utility class for generating summary profiles of Polars and PySpark DataFrames,
     including missing values, unique counts, and top frequent values.
     """
+
     def __init__(self, top_n_freq=3):
         """
         Initializes the DataProfiler.
 
         Args:
-            top_n_freq (int, optional): Number of most frequent values to track per column. 
+            top_n_freq (int, optional): Number of most frequent values to track per column.
                                         Defaults to 3.
         """
         self.top_n = top_n_freq
@@ -26,18 +32,18 @@ class DataProfiler:
 
         Args:
             df (pl.DataFrame | SparkDataFrame): The Polars or PySpark DataFrame to profile.
-            output (str, optional): The output format. 'print' prints to console, 'dataframe' 
+            output (str, optional): The output format. 'print' prints to console, 'dataframe'
                                     returns a summary DataFrame. Defaults to "print".
 
         Returns:
-            pl.DataFrame | SparkDataFrame | None: A summary DataFrame if output is 'dataframe', 
+            pl.DataFrame | SparkDataFrame | None: A summary DataFrame if output is 'dataframe',
                                                   otherwise None.
 
         Raises:
             ValueError: If the input DataFrame type is not supported.
         """
         df_type = str(type(df)).lower()
-        
+
         if "polars" in df_type:
             return self._profile_polars(df, output)
         elif "pyspark" in df_type:
@@ -60,7 +66,7 @@ class DataProfiler:
         results = []
 
         if output == "print":
-            print(f"=== POLARS DATAFRAME PROFILE ===")
+            print("=== POLARS DATAFRAME PROFILE ===")
             print(f"Shape: {total_rows} rows, {df.width} columns\n" + "=" * 40)
 
         for col_name, dtype in df.schema.items():
@@ -68,26 +74,30 @@ class DataProfiler:
             null_count = df[col_name].null_count()
             null_pct = round((null_count / total_rows * 100), 2) if total_rows > 0 else 0
             n_unique = df[col_name].n_unique()
-            is_unique = (n_unique == total_rows)
-            
+            is_unique = n_unique == total_rows
+
             counts = df[col_name].value_counts().sort("count", descending=True).head(self.top_n)
             freq_vals = [f"{row[col_name]}: {row['count']}" for row in counts.iter_rows(named=True)]
             top_vals_str = " | ".join(freq_vals)
 
             if output == "print":
                 print(f"Column: {col_name}")
-                print(f"  Type: {dtype}\n  Missing: {null_count} ({null_pct}%)\n  Unique: {n_unique} (All Unique: {is_unique})\n  Top {self.top_n}: {top_vals_str}")
+                print(
+                    f"  Type: {dtype}\n  Missing: {null_count} ({null_pct}%)\n  Unique: {n_unique} (All Unique: {is_unique})\n  Top {self.top_n}: {top_vals_str}"
+                )
                 print("-" * 40)
             else:
-                results.append({
-                    "column": col_name,
-                    "dtype": str(dtype),
-                    "missing_count": null_count,
-                    "missing_pct": null_pct,
-                    "unique_count": n_unique,
-                    "is_all_unique": is_unique,
-                    "top_values": top_vals_str
-                })
+                results.append(
+                    {
+                        "column": col_name,
+                        "dtype": str(dtype),
+                        "missing_count": null_count,
+                        "missing_pct": null_pct,
+                        "unique_count": n_unique,
+                        "is_all_unique": is_unique,
+                        "top_values": top_vals_str,
+                    }
+                )
 
         if output == "dataframe":
             return pl.DataFrame(results)
@@ -107,25 +117,25 @@ class DataProfiler:
         results = []
 
         if output == "print":
-            print(f"=== PYSPARK DATAFRAME PROFILE ===")
+            print("=== PYSPARK DATAFRAME PROFILE ===")
             print(f"Shape: {total_rows} rows, {len(df.columns)} columns\n" + "=" * 40)
 
         agg_exprs = []
         for c in df.columns:
             agg_exprs.append(F.sum(F.when(F.col(c).isNull(), 1).otherwise(0)).alias(f"{c}_nulls"))
             agg_exprs.append(F.approx_count_distinct(c).alias(f"{c}_uniques"))
-        
+
         # Executes exactly ONE Spark job to gather all nulls and unique counts
         stats_row = df.agg(*agg_exprs).collect()[0]
 
         for col_name in df.columns:
             dtype = df.schema[col_name].dataType.typeName()
-            
+
             # Fetch the pre-calculated stats from the single row
             null_count = stats_row[f"{col_name}_nulls"] or 0
             null_pct = round((null_count / total_rows * 100), 2) if total_rows > 0 else 0
             n_unique = stats_row[f"{col_name}_uniques"]
-            is_unique_approx = n_unique >= (total_rows * 0.99) # Approximation threshold
+            is_unique_approx = n_unique >= (total_rows * 0.99)  # Approximation threshold
 
             # This triggers 1 job per column to get the top N frequent values
             freq_df = df.groupBy(col_name).count().orderBy(F.col("count").desc()).limit(self.top_n).collect()
@@ -134,26 +144,28 @@ class DataProfiler:
 
             if output == "print":
                 print(f"Column: {col_name}")
-                print(f"  Type: {dtype}\n  Missing: {null_count} ({null_pct}%)\n  Approx Unique: {n_unique}\n  Top {self.top_n}: {top_vals_str}")
+                print(
+                    f"  Type: {dtype}\n  Missing: {null_count} ({null_pct}%)\n  Approx Unique: {n_unique}\n  Top {self.top_n}: {top_vals_str}"
+                )
                 print("-" * 40)
             else:
-                results.append((
-                    col_name, dtype, null_count, float(null_pct), 
-                    n_unique, is_unique_approx, top_vals_str
-                ))
+                results.append((col_name, dtype, null_count, float(null_pct), n_unique, is_unique_approx, top_vals_str))
 
         if output == "dataframe":
             spark = df.sparkSession
-            schema = StructType([
-                StructField("column", StringType(), True),
-                StructField("dtype", StringType(), True),
-                StructField("missing_count", LongType(), True),
-                StructField("missing_pct", DoubleType(), True),
-                StructField("approx_unique_count", LongType(), True),
-                StructField("is_all_unique_approx", BooleanType(), True),
-                StructField("top_values", StringType(), True)
-            ])
+            schema = StructType(
+                [
+                    StructField("column", StringType(), True),
+                    StructField("dtype", StringType(), True),
+                    StructField("missing_count", LongType(), True),
+                    StructField("missing_pct", DoubleType(), True),
+                    StructField("approx_unique_count", LongType(), True),
+                    StructField("is_all_unique_approx", BooleanType(), True),
+                    StructField("top_values", StringType(), True),
+                ]
+            )
             return spark.createDataFrame(results, schema=schema)
+
 
 def frame_shape(df: SparkDataFrame) -> tuple[int, int]:
     """
@@ -170,12 +182,13 @@ def frame_shape(df: SparkDataFrame) -> tuple[int, int]:
     print(f"Shape: ({rows}, {cols})")
     return (rows, cols)
 
+
 def clean_column_names(df: SparkDataFrame) -> SparkDataFrame:
     """
     Renames DataFrame columns to be Delta-compatible by replacing special characters.
-    
-    Keeps only alphanumeric characters and underscores, and collapses multiple 
-    consecutive underscores into a single one. Ensures unique column names to 
+
+    Keeps only alphanumeric characters and underscores, and collapses multiple
+    consecutive underscores into a single one. Ensures unique column names to
     prevent ambiguous reference errors.
 
     Args:
@@ -185,31 +198,32 @@ def clean_column_names(df: SparkDataFrame) -> SparkDataFrame:
         SparkDataFrame: A new PySpark DataFrame with sanitized, unique column names.
     """
     # Pattern: match anything that is NOT a-z, A-Z, 0-9, or _
-    pattern = re.compile(r'[^a-zA-Z0-9_]')
-    
+    pattern = re.compile(r"[^a-zA-Z0-9_]")
+
     new_cols = []
     seen = set()
-    
+
     for col in df.columns:
-        clean_name = pattern.sub('_', col)
+        clean_name = pattern.sub("_", col)
         # Collapse multiple underscores into one
-        clean_name = re.sub(r'_+', '_', clean_name).strip('_')
-        
+        clean_name = re.sub(r"_+", "_", clean_name).strip("_")
+
         # Fallback if the name was entirely special characters
         if not clean_name:
             clean_name = "column"
-            
+
         # Deduplicate collisions to avoid Spark AnalysisExceptions
         final_name = clean_name
         counter = 1
         while final_name in seen:
             final_name = f"{clean_name}_{counter}"
             counter += 1
-            
+
         seen.add(final_name)
         new_cols.append(final_name)
-    
+
     return df.toDF(*new_cols)
+
 
 def keep_duplicates(df: SparkDataFrame, subset: list[str] | str) -> SparkDataFrame:
     """
@@ -219,19 +233,15 @@ def keep_duplicates(df: SparkDataFrame, subset: list[str] | str) -> SparkDataFra
     if isinstance(subset, str):
         subset = [subset]
 
-    duplicate_keys = (
-        df.groupBy(*subset)
-        .count()
-        .filter(F.col("count") > 1)
-        .drop("count")
-    )
-    
+    duplicate_keys = df.groupBy(*subset).count().filter(F.col("count") > 1).drop("count")
+
     return df.join(F.broadcast(duplicate_keys), on=subset, how="inner")
+
 
 def is_unique(df: SparkDataFrame, column_name: str) -> bool:
     """
     Checks if all values in a specified column of a PySpark DataFrame are unique.
-    
+
     Uses a short-circuiting groupBy operation for performance.
 
     Args:
@@ -243,26 +253,27 @@ def is_unique(df: SparkDataFrame, column_name: str) -> bool:
     """
     if column_name not in df.columns:
         raise ValueError(f"Column '{column_name}' not found in the DataFrame.")
-        
+
     # Group by the column, count occurrences, and filter for counts > 1.
-    # take(1) triggers a short-circuit, making it much faster than a full distinct().count() 
+    # take(1) triggers a short-circuit, making it much faster than a full distinct().count()
     # if a duplicate exists.
     duplicates = df.groupBy(column_name).count().filter(F.col("count") > 1).take(1)
-    
+
     unique = len(duplicates) == 0
-    
+
     if unique:
         print(f"Column '{column_name}' is unique: yes")
     else:
         print(f"Column '{column_name}' is unique: no")
-        
+
     return unique
+
 
 def glimpse(df: SparkDataFrame, n: int = 5, truncate: int = 75) -> None:
     """
     Prints a concise, vertical summary of a Spark DataFrame.
 
-    Similar to R's dplyr::glimpse or Polars' .glimpse(). Shows the number of rows 
+    Similar to R's dplyr::glimpse or Polars' .glimpse(). Shows the number of rows
     and columns, followed by column names, data types, and the first few values.
     Note: This triggers a Spark job to count rows and fetch the top `n` records.
 
@@ -274,49 +285,42 @@ def glimpse(df: SparkDataFrame, n: int = 5, truncate: int = 75) -> None:
     # 1. Get shape (triggers a Spark job)
     rows = df.count()
     cols = len(df.columns)
-    
+
     print(f"Rows: {rows}")
     print(f"Columns: {cols}")
-    
+
     if rows == 0 or cols == 0:
         return
-    
+
     # 2. Fetch the first n rows to the driver
     head_rows = df.take(n)
     dtypes = dict(df.dtypes)
-    
+
     # 3. Calculate max lengths for nice visual alignment
     max_col_len = max([len(c) for c in df.columns])
     max_type_len = max([len(t) for _, t in df.dtypes])
-    
+
     # 4. Print the aligned schema and data preview
     for col_name in df.columns:
         dtype = dtypes[col_name]
-        
+
         # Extract and stringify values for this column
         # Replace None with "null" for clearer visual representation
-        vals = [
-            "null" if getattr(row, col_name) is None else str(getattr(row, col_name)) 
-            for row in head_rows
-        ]
+        vals = ["null" if getattr(row, col_name) is None else str(getattr(row, col_name)) for row in head_rows]
         vals_str = ", ".join(vals)
-        
+
         # Truncate if the preview string gets too long
         if len(vals_str) > truncate:
             vals_str = vals_str[:truncate] + "..."
-            
+
         # Formatting: $ col_name <type> values
         aligned_col = col_name.ljust(max_col_len)
-        aligned_type = f"<{dtype}>".ljust(max_type_len + 2) # +2 for the angle brackets
-        
+        aligned_type = f"<{dtype}>".ljust(max_type_len + 2)  # +2 for the angle brackets
+
         print(f"$ {aligned_col} {aligned_type} {vals_str}")
 
-def apply_column_comments(
-    spark: SparkSession,
-    table_name: str,
-    comments: Dict[str, str],
-    verbose: bool = True
-) -> None:
+
+def apply_column_comments(spark: SparkSession, table_name: str, comments: Dict[str, str], verbose: bool = True) -> None:
     """
     Applies column comments to a specified table only if the comment has changed.
 
@@ -333,7 +337,7 @@ def apply_column_comments(
         spark (SparkSession): The active PySpark session.
         table_name (str): Fully-qualified target table name.
         comments (Dict[str, str]): A dictionary mapping column names to their new comment strings.
-        verbose (bool, optional): If True, prints details about skipped vs updated columns. 
+        verbose (bool, optional): If True, prints details about skipped vs updated columns.
                                   Defaults to True.
     """
     # 1. Get existing schema and metadata
@@ -366,13 +370,12 @@ def apply_column_comments(
 
     # 3. Process the comments
     for col, new_comment_raw in comments.items():
-        
         # Normalize input: Treat None as empty string for comparison
         new_comment = new_comment_raw if new_comment_raw else ""
 
         # CONDITION A: Check if input is "empty" (per requirement)
         if new_comment == "":
-            if verbose: 
+            if verbose:
                 print(f"Skipping '{col}': Input comment is empty.")
             continue
 
@@ -383,7 +386,7 @@ def apply_column_comments(
 
         # CONDITION C: Compare New vs Old (The optimization)
         current_comment = existing_col_map[col]
-        
+
         if new_comment == current_comment:
             skipped_count += 1
             # Debug log only if you really want to see noise, otherwise keep silent or minimal
@@ -401,7 +404,7 @@ def apply_column_comments(
         COMMENT ON COLUMN {table_name}.{col}
         IS '{escaped_comment}'
         """
-        
+
         try:
             spark.sql(sql)
             updated_count += 1
@@ -410,6 +413,7 @@ def apply_column_comments(
 
     if verbose:
         print(f"\n--- Done. Updated: {updated_count} | Skipped (No Change): {skipped_count} ---")
+
 
 def display2(df: Any, is_dev: bool = None) -> None:
     """
@@ -449,8 +453,8 @@ def display2(df: Any, is_dev: bool = None) -> None:
             return  # Success!
         except Exception as e:
             print(f"Databricks display() failed: {e}. Falling back...")
-    
-    # If we reach here, we are probably testing locally (e.g., in pytest) 
+
+    # If we reach here, we are probably testing locally (e.g., in pytest)
     # where Databricks widgets don't exist.
     if hasattr(df, "show"):
         df.show()

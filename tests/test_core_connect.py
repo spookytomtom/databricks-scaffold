@@ -1,7 +1,9 @@
-import pytest
 from unittest.mock import MagicMock
-from databricks_scaffold.core import _is_databricks_connect
+
+import pytest
+
 from databricks_scaffold import core as _core
+from databricks_scaffold.core import _is_databricks_connect
 
 
 def test_local_sparksession_is_not_connect(spark):
@@ -12,6 +14,7 @@ def test_local_sparksession_is_not_connect(spark):
 def test_returns_false_when_sdk_not_installed(spark, monkeypatch):
     """Missing databricks.connect.session import must return False, not raise."""
     import sys
+
     monkeypatch.setitem(sys.modules, "databricks.connect.session", None)
     assert _is_databricks_connect(spark) is False
 
@@ -346,7 +349,9 @@ def test_load_checkpoint_spark_raises_when_missing_under_connect(spiller_connect
 
 
 @pytest.mark.requires_pyspark
-def test_load_checkpoint_spark_under_connect_does_not_call_os_path_exists_on_volume(spiller_connect, spark, monkeypatch):
+def test_load_checkpoint_spark_under_connect_does_not_call_os_path_exists_on_volume(
+    spiller_connect, spark, monkeypatch
+):
     spark_df = spark.createDataFrame([(1,)], ["id"])
     spiller_connect.save_checkpoint_spark(spark_df, name="sp_ckpt2")
 
@@ -372,6 +377,7 @@ from databricks_scaffold.core import _retry_op
 def test_retry_op_succeeds_after_transient_failures(monkeypatch):
     """_retry_op retries on transient SDK errors and returns the successful result."""
     from databricks.sdk.errors import ResourceExhausted
+
     monkeypatch.setattr("databricks_scaffold.core.time.sleep", lambda _: None)
 
     calls = {"n": 0}
@@ -390,6 +396,7 @@ def test_retry_op_succeeds_after_transient_failures(monkeypatch):
 def test_retry_op_raises_after_max_retries_exhausted(monkeypatch):
     """_retry_op raises the last exception when max retries are exhausted."""
     from databricks.sdk.errors import ResourceExhausted
+
     monkeypatch.setattr("databricks_scaffold.core.time.sleep", lambda _: None)
 
     def always_fails():
@@ -402,6 +409,7 @@ def test_retry_op_raises_after_max_retries_exhausted(monkeypatch):
 def test_retry_op_propagates_non_retryable_errors_immediately(monkeypatch):
     """_retry_op does not retry errors outside _RETRYABLE_SDK_ERRORS."""
     from databricks.sdk.errors import PermissionDenied
+
     monkeypatch.setattr("databricks_scaffold.core.time.sleep", lambda _: None)
 
     calls = {"n": 0}
@@ -419,6 +427,7 @@ def test_retry_op_propagates_non_retryable_errors_immediately(monkeypatch):
 def test_upload_dir_retries_on_transient_error(spiller_connect, tmp_path, monkeypatch):
     """Single-file upload retries a 429 and ultimately succeeds."""
     from databricks.sdk.errors import ResourceExhausted
+
     monkeypatch.setattr("databricks_scaffold.core.time.sleep", lambda _: None)
 
     local_src = tmp_path / "src"
@@ -446,6 +455,7 @@ def test_upload_dir_retries_on_transient_error(spiller_connect, tmp_path, monkey
 def test_upload_dir_raises_after_exhausted_retries(spiller_connect, tmp_path, monkeypatch):
     """Upload raises after all retry attempts are exhausted."""
     from databricks.sdk.errors import ResourceExhausted
+
     monkeypatch.setattr("databricks_scaffold.core.time.sleep", lambda _: None)
 
     local_src = tmp_path / "src"
@@ -498,6 +508,7 @@ def test_download_dir_many_files_all_land(spiller_connect, tmp_path):
 # I6: _DF_TYPES tuple covers ConnectDataFrame, not just SparkDataFrame
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 def test_df_types_includes_connect_dataframe():
     """_DF_TYPES must contain ConnectDataFrame when pyspark.sql.connect is importable.
     If someone removes it from the tuple, this test fails immediately."""
@@ -540,6 +551,7 @@ def test_save_checkpoint_spark_rejects_non_dataframe(spiller_connect):
 # ──────────────────────────────────────────────────────────────────────────────
 # I8: helpful error message when Connect cluster is stopped at __init__
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 def test_init_raises_helpful_error_when_connect_cluster_down(monkeypatch):
     """When spark.sql raises under Connect, __init__ re-raises with a clear hint."""

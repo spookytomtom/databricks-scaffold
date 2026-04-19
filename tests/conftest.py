@@ -1,18 +1,19 @@
-import importlib.util
-import pytest
-import shutil
-import os
 import errno
-from pathlib import Path
+import importlib.util
+import os
+import shutil
 from types import SimpleNamespace
 from unittest.mock import MagicMock
+
+import pytest
+
 import databricks_scaffold.core as _core
 from databricks_scaffold.core import VolumeSpiller
-
 
 try:
     from databricks.sdk.errors import NotFound as _SdkNotFound
 except ImportError:
+
     class _SdkNotFound(OSError):  # type: ignore[assignment]
         pass
 
@@ -90,9 +91,7 @@ def pytest_configure(config):
 
 def pytest_collection_modifyitems(config, items):
     if not _local_spark_available():
-        skip = pytest.mark.skip(
-            reason="requires standalone pyspark — skipped in databricks-connect environments"
-        )
+        skip = pytest.mark.skip(reason="requires standalone pyspark — skipped in databricks-connect environments")
         for item in items:
             if item.get_closest_marker("requires_pyspark"):
                 item.add_marker(skip)

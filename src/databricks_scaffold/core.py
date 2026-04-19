@@ -1,19 +1,20 @@
 import atexit
-import uuid
+import logging
+import os
+import random
 import shutil
 import tempfile
-import os
-import glob
-import functools
-import logging
-import random
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
 import polars as pl
-from pyspark.sql import DataFrame as SparkDataFrame, SparkSession
+from pyspark.sql import DataFrame as SparkDataFrame
+from pyspark.sql import SparkSession
 
 try:
     from pyspark.sql.connect.dataframe import DataFrame as ConnectDataFrame
+
     _DF_TYPES = (SparkDataFrame, ConnectDataFrame)
 except ImportError:
     ConnectDataFrame = None  # type: ignore[assignment,misc]
@@ -22,14 +23,19 @@ except ImportError:
 try:
     from databricks.sdk.errors import NotFound as _SdkNotFound
 except ImportError:
+
     class _SdkNotFound(Exception):  # type: ignore[assignment]
         pass
 
+
 try:
     from databricks.sdk.errors import (
-        ResourceExhausted as _SdkResourceExhausted,  # 429 — API rate limit
-        InternalError as _SdkInternalError,           # 5xx — transient server error
+        InternalError as _SdkInternalError,  # 5xx — transient server error
     )
+    from databricks.sdk.errors import (
+        ResourceExhausted as _SdkResourceExhausted,  # 429 — API rate limit
+    )
+
     # Only these two are worth retrying; auth errors (403) and missing paths (404)
     # won't fix themselves with time and should surface immediately.
     _RETRYABLE_SDK_ERRORS: tuple = (_SdkResourceExhausted, _SdkInternalError)
@@ -37,8 +43,9 @@ except ImportError:
     _RETRYABLE_SDK_ERRORS = ()
 
 import getpass
-from pathlib import Path
 import re
+from pathlib import Path
+
 from databricks_scaffold._internal import _resolve_is_dev
 
 _logger = logging.getLogger(__name__)
@@ -47,10 +54,13 @@ _logger = logging.getLogger(__name__)
 #   Volume paths  → f"{parent}/{name}"  (forward slash — Files API requires POSIX separators)
 #   Local paths   → os.path.join(...)   (OS-native separators, safe on Windows)
 
-_CONNECT_SESSION_MODULES = frozenset([
-    "pyspark.sql.connect.session",
-    "databricks.connect.session",
-])
+_CONNECT_SESSION_MODULES = frozenset(
+    [
+        "pyspark.sql.connect.session",
+        "databricks.connect.session",
+    ]
+)
+
 
 def _is_databricks_connect(spark) -> bool:
     """
@@ -74,6 +84,7 @@ def _is_databricks_connect(spark) -> bool:
     # Check 1: isinstance — requires the package to be present.
     try:
         from databricks.connect.session import DatabricksSession
+
         if isinstance(spark, DatabricksSession):
             return True
         # Check 3: structural duck-type — Connect sessions expose a gRPC client.
@@ -89,6 +100,7 @@ def _is_databricks_connect(spark) -> bool:
     except ImportError:
         return False
 
+
 def _retry_op(fn, max_retries: int = 5, base_delay: float = 0.5):
     """Retry fn() with exponential back-off on rate-limit / server errors."""
     for attempt in range(max_retries):
@@ -101,7 +113,7 @@ def _retry_op(fn, max_retries: int = 5, base_delay: float = 0.5):
                 raise
             # Jitter prevents multiple parallel threads from retrying in lockstep
             # and hammering the API again as a synchronized wave.
-            time.sleep(base_delay * (2 ** attempt) + random.uniform(0, 0.1))
+            time.sleep(base_delay * (2**attempt) + random.uniform(0, 0.1))
 
 
 class VolumeSpiller:
@@ -109,6 +121,7 @@ class VolumeSpiller:
     A utility class to manage data spilling and checkpointing between PySpark and Polars
     using Databricks Unity Catalog Volumes and local driver storage.
     """
+
     def __init__(
         self,
         spark: SparkSession,
@@ -153,7 +166,7 @@ class VolumeSpiller:
         user = getpass.getuser().replace("\\", "_").replace("/", "_")
         self.local_base_dir = Path(tempfile.gettempdir()) / "databricks-scaffold" / user
         self.local_base_dir.mkdir(parents=True, exist_ok=True)
-        
+
         try:
             if self.is_dev:
                 self.spark.sql(f"CREATE VOLUME IF NOT EXISTS {self.full_name}")
@@ -168,7 +181,7 @@ class VolumeSpiller:
                     f"(original error: {exc})"
                 ) from exc
             raise
-            
+
         self._is_connect = _is_databricks_connect(self.spark)
         self._active_local_dirs: list[str] = []
         self._active_volume_dirs: list[str] = []
@@ -182,6 +195,7 @@ class VolumeSpiller:
         """Lazy WorkspaceClient accessor. Only built when first volume I/O happens under Connect."""
         if self._w is None:
             from databricks.sdk import WorkspaceClient
+
             self._w = WorkspaceClient()
         return self._w
 
@@ -250,17 +264,20 @@ class VolumeSpiller:
         """
         os.makedirs(local_dir, exist_ok=True)  # destination is always local — os.makedirs, not _volume_mkdirs
         entries = [
-            e for e in self._workspace.files.list_directory_contents(volume_dir)
+            e
+            for e in self._workspace.files.list_directory_contents(volume_dir)
             if not e.is_directory and e.name.endswith(".parquet")
         ]
 
         def _download_one(entry) -> None:
             dst = os.path.join(local_dir, entry.name)
-            _retry_op(lambda: self._workspace.files.download_to(
-                file_path=entry.path,
-                destination=dst,
-                use_parallel=True,
-            ))
+            _retry_op(
+                lambda: self._workspace.files.download_to(
+                    file_path=entry.path,
+                    destination=dst,
+                    use_parallel=True,
+                )
+            )
 
         # max_workers=8 balances throughput vs. rate-limit pressure; more threads
         # increase 429 risk on the Files API.  as_completed + result() gives
@@ -284,12 +301,14 @@ class VolumeSpiller:
         def _upload_one(name: str) -> None:
             src = os.path.join(local_dir, name)
             dst = f"{volume_dir}/{name}"
-            _retry_op(lambda: self._workspace.files.upload_from(
-                file_path=dst,
-                source_path=src,
-                overwrite=True,
-                use_parallel=True,
-            ))
+            _retry_op(
+                lambda: self._workspace.files.upload_from(
+                    file_path=dst,
+                    source_path=src,
+                    overwrite=True,
+                    use_parallel=True,
+                )
+            )
 
         # Same rationale as _download_volume_dir: 8 threads, fail-fast on first
         # error.  Fail-fast matters here because the old checkpoint is already
@@ -311,7 +330,7 @@ class VolumeSpiller:
             str: The absolute path string.
         """
         return f"{self.volume_root}/{name.lstrip('/')}"
-    
+
     def _resolve_path(self, name: str, storage: str):
         """
         Internal helper to resolve the base path based on the target storage tier.
@@ -340,7 +359,7 @@ class VolumeSpiller:
             os.makedirs(path, exist_ok=True)
 
         return path, storage
-    
+
     def _prepare_polars_timestamps(self, df: pl.DataFrame | pl.LazyFrame) -> pl.DataFrame | pl.LazyFrame:
         """
         Internal helper to fix timestamp precision and attach UTC timezones for Spark compatibility.
@@ -352,28 +371,28 @@ class VolumeSpiller:
             pl.DataFrame | pl.LazyFrame: The processed Polars DataFrame with corrected timestamps.
         """
         schema = df.collect_schema() if isinstance(df, pl.LazyFrame) else df.schema
-        
+
         exprs = []
         for col_name, dtype in schema.items():
             if isinstance(dtype, pl.Datetime):
                 expr = pl.col(col_name)
                 modified = False
-                
+
                 # 1. Fix precision: Convert both nanoseconds and microseconds to milliseconds
                 if dtype.time_unit in ("ns", "us"):
                     expr = expr.dt.cast_time_unit("ms")
                     modified = True
                     print(f"⏰ Auto-fix: Casting '{col_name}' from {dtype.time_unit} to ms.")
-                
+
                 # 2. Fix timezone: Add UTC to prevent timestamp_ntz in Spark
                 if dtype.time_zone is None:
                     expr = expr.dt.replace_time_zone("UTC")
                     modified = True
                     print(f"🌍 Auto-fix: Adding UTC timezone to '{col_name}' to avoid timestamp_ntz.")
-                    
+
                 if modified:
                     exprs.append(expr)
-                    
+
         if exprs:
             return df.with_columns(exprs)
         return df
@@ -396,33 +415,19 @@ class VolumeSpiller:
             if not self._volume_exists(root):
                 return []
             if self._is_connect:
-                return sorted(
-                    e.name
-                    for e in self._workspace.files.list_directory_contents(root)
-                    if e.is_directory
-                )
-            return sorted(
-                name for name in os.listdir(root)
-                if os.path.isdir(os.path.join(root, name))
-            )
+                return sorted(e.name for e in self._workspace.files.list_directory_contents(root) if e.is_directory)
+            return sorted(name for name in os.listdir(root) if os.path.isdir(os.path.join(root, name)))
 
         elif storage == "local":
             if not self.local_base_dir.exists():
                 return []
-            return sorted(
-                p.name for p in self.local_base_dir.iterdir()
-                if p.is_dir()
-            )
+            return sorted(p.name for p in self.local_base_dir.iterdir() if p.is_dir())
 
         else:
             raise ValueError("storage must be 'volume' or 'local'")
 
     def save_checkpoint_pl(
-        self,
-        df: pl.DataFrame | pl.LazyFrame,
-        name: str,
-        storage: str = "volume",
-        compression: str = "auto"
+        self, df: pl.DataFrame | pl.LazyFrame, name: str, storage: str = "volume", compression: str = "auto"
     ) -> None:
         """
         Saves a Polars DataFrame checkpoint to either the UC Volume or driver-local /tmp.
@@ -502,12 +507,7 @@ class VolumeSpiller:
         prefix = "⚡ Local" if resolved_storage == "local" else "✅ Volume"
         print(f"{prefix} checkpoint '{name}' written using {compression} compression.")
 
-    def load_checkpoint_pl(
-        self,
-        name: str,
-        eager: bool = True,
-        storage: str = "volume"
-    ) -> pl.DataFrame | pl.LazyFrame:
+    def load_checkpoint_pl(self, name: str, eager: bool = True, storage: str = "volume") -> pl.DataFrame | pl.LazyFrame:
         """
         Loads a named Parquet checkpoint into a Polars DataFrame.
 
@@ -592,7 +592,7 @@ class VolumeSpiller:
 
         if optimize_files:
             df = df.coalesce(2)
-            
+
         # Hardcoding zstd since this explicitly saves to the Volume
         df.write.mode("overwrite").option("compression", "zstd").parquet(checkpoint_dir)
         print(f"✅ Spark checkpoint '{name}' written to UC Volume using zstd compression.")
@@ -656,7 +656,9 @@ class VolumeSpiller:
             self.spark.sql(f"DROP VOLUME IF EXISTS {self.full_name}")
             print(f"🗑️ PROD MODE: Volume {self.full_name} dropped.")
 
-    def spark_to_polars(self, df: SparkDataFrame, cleanup: bool = False, eager: bool = True, optimize_files: bool = False) -> pl.DataFrame | pl.LazyFrame:
+    def spark_to_polars(
+        self, df: SparkDataFrame, cleanup: bool = False, eager: bool = True, optimize_files: bool = False
+    ) -> pl.DataFrame | pl.LazyFrame:
         """
         Spills a PySpark DataFrame to the UC volume, then reads it back as Polars.
 
