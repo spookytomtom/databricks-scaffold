@@ -1,12 +1,15 @@
 import atexit
+import getpass
 import logging
 import os
 import random
+import re
 import shutil
 import tempfile
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 
 import polars as pl
 from pyspark.sql import DataFrame as SparkDataFrame
@@ -41,10 +44,6 @@ try:
     _RETRYABLE_SDK_ERRORS: tuple = (_SdkResourceExhausted, _SdkInternalError)
 except ImportError:
     _RETRYABLE_SDK_ERRORS = ()
-
-import getpass
-import re
-from pathlib import Path
 
 from databricks_scaffold._internal import _resolve_is_dev
 

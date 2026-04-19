@@ -1,9 +1,11 @@
+import os
 from unittest.mock import MagicMock
 
+import polars as pl
 import pytest
 
 from databricks_scaffold import core as _core
-from databricks_scaffold.core import _is_databricks_connect
+from databricks_scaffold.core import _is_databricks_connect, _retry_op
 
 
 def test_local_sparksession_is_not_connect(spark):
@@ -50,8 +52,6 @@ def test_spiller_workspace_client_is_lazy(spiller_connect):
     """
     assert spiller_connect._workspace is spiller_connect._w
 
-
-import os
 
 
 def test_volume_mkdirs_uses_files_api_under_connect(spiller_connect):
@@ -156,8 +156,6 @@ def test_teardown_cleans_both_local_and_volume_tracked_dirs(spiller_connect, tmp
     assert not local_dir.exists()
     assert not os.path.exists(volume_dir)
 
-
-import polars as pl
 
 
 @pytest.mark.requires_pyspark
@@ -370,8 +368,6 @@ def test_load_checkpoint_spark_under_connect_does_not_call_os_path_exists_on_vol
 # ──────────────────────────────────────────────────────────────────────────────
 # I1: parallel uploads/downloads with exponential-backoff retry
 # ──────────────────────────────────────────────────────────────────────────────
-
-from databricks_scaffold.core import _retry_op
 
 
 def test_retry_op_succeeds_after_transient_failures(monkeypatch):
