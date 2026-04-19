@@ -245,6 +245,14 @@ def keep_duplicates(df: SparkDataFrame, subset: list[str] | str) -> SparkDataFra
     """
     Filters the DataFrame to keep only rows that have duplicates based on specified columns.
     Optimized to prevent full-table shuffles by using a broadcast join.
+
+    Args:
+        df (SparkDataFrame): The PySpark DataFrame to filter.
+        subset (list[str] | str): Column name(s) to check for duplicates.
+
+    Returns:
+        SparkDataFrame: A new PySpark DataFrame containing only rows with duplicate values
+                        in the specified subset columns.
     """
     if isinstance(subset, str):
         subset = [subset]
@@ -297,6 +305,9 @@ def glimpse(df: SparkDataFrame, n: int = 5, truncate: int = 75) -> None:
         df (SparkDataFrame): The PySpark DataFrame to glimpse.
         n (int, optional): Number of rows to preview. Defaults to 5.
         truncate (int, optional): Maximum string length for the preview values. Defaults to 75.
+
+    Returns:
+        None: This function prints output and does not return a value.
     """
     # 1. Get shape (triggers a Spark job)
     rows = df.count()
@@ -355,6 +366,9 @@ def apply_column_comments(spark: SparkSession, table_name: str, comments: dict[s
         comments (dict[str, str]): A dictionary mapping column names to their new comment strings.
         verbose (bool, optional): If True, prints details about skipped vs updated columns.
                                   Defaults to True.
+
+    Returns:
+        None: This function applies comments in-place and does not return a value.
     """
     # 1. Get existing schema and metadata
     try:
@@ -444,6 +458,10 @@ def display2(df: Any, is_dev: bool | None = None) -> None:
     Args:
         df: The DataFrame to display.
         is_dev (bool, optional): Flag indicating if the environment is development.
+                                 Defaults to True if IS_DEV is not set.
+
+    Returns:
+        None: This function displays the DataFrame and does not return a value.
     """
     # 1. Resolve IS_DEV using shared logic
     is_dev = _resolve_is_dev(is_dev)
