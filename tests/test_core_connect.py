@@ -1,3 +1,6 @@
+# Fixtures used: spiller (VolumeSpiller with local temp dir, _is_connect=False),
+# spiller_connect (VolumeSpiller with mocked WorkspaceClient, _is_connect=True),
+# spark (pyspark.sql.SparkSession), monkeypatch (pytest built-in), tmp_path (pytest built-in)
 import os
 from unittest.mock import MagicMock
 
