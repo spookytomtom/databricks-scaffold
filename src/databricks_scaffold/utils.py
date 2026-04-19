@@ -16,7 +16,7 @@ class DataProfiler:
     including missing values, unique counts, and top frequent values.
     """
 
-    def __init__(self, top_n_freq=3):
+    def __init__(self, top_n_freq: int = 3) -> None:
         """
         Initializes the DataProfiler.
 
@@ -26,7 +26,7 @@ class DataProfiler:
         """
         self.top_n = top_n_freq
 
-    def profile(self, df, output="print") -> pl.DataFrame | SparkDataFrame | None:
+    def profile(self, df: pl.DataFrame | SparkDataFrame, output: str = "print") -> pl.DataFrame | SparkDataFrame | None:
         """
         Routes the DataFrame to the correct profiling engine based on its type.
 
@@ -51,7 +51,7 @@ class DataProfiler:
         else:
             raise ValueError(f"Unsupported type: {type(df)}. Please pass Polars or PySpark.")
 
-    def _profile_polars(self, df, output) -> pl.DataFrame | None:
+    def _profile_polars(self, df: pl.DataFrame, output: str) -> pl.DataFrame | None:
         """
         Internal method to profile a Polars DataFrame.
 
@@ -102,7 +102,7 @@ class DataProfiler:
         if output == "dataframe":
             return pl.DataFrame(results)
 
-    def _profile_pyspark(self, df, output) -> SparkDataFrame | None:
+    def _profile_pyspark(self, df: SparkDataFrame, output: str) -> SparkDataFrame | None:
         """
         Internal method to profile a PySpark DataFrame.
 
@@ -336,7 +336,7 @@ def apply_column_comments(spark: SparkSession, table_name: str, comments: dict[s
     Args:
         spark (SparkSession): The active PySpark session.
         table_name (str): Fully-qualified target table name.
-        comments (Dict[str, str]): A dictionary mapping column names to their new comment strings.
+        comments (dict[str, str]): A dictionary mapping column names to their new comment strings.
         verbose (bool, optional): If True, prints details about skipped vs updated columns.
                                   Defaults to True.
     """
@@ -415,7 +415,7 @@ def apply_column_comments(spark: SparkSession, table_name: str, comments: dict[s
         print(f"\n--- Done. Updated: {updated_count} | Skipped (No Change): {skipped_count} ---")
 
 
-def display2(df: Any, is_dev: bool = None) -> None:
+def display2(df: Any, is_dev: bool | None = None) -> None:
     """
     Displays a DataFrame (Spark, Polars, or Pandas) using Databricks' built-in display()
     only if is_dev is True. If is_dev is not explicitly provided, reads IS_DEV from the
