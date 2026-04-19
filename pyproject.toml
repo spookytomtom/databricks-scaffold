@@ -28,12 +28,36 @@ dependencies = [
 dev = [
     "pytest>=7.0",
     "pytest-cov",
+    "ruff>=0.4.0",
 ]
 
 [project.urls]
 Repository = "https://github.com/spookytomtom/databricks-scaffold"
 
 # If you followed the recommendation to put code in src/databricks_scaffold:
+[tool.ruff]
+line-length = 120
+target-version = "py39"
+
+[tool.ruff.lint]
+select = [
+    "I",    # isort - import ordering
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "UP006", # use typing syntax (e.g., list[str] instead of List[str])
+    "UP007", # use X | Y instead of Union[X, Y]
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["databricks_scaffold"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
 [tool.setuptools]
 packages = ["databricks_scaffold"]
 package-dir = {"" = "src"}

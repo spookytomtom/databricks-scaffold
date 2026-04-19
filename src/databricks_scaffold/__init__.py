@@ -1,19 +1,20 @@
 # Import the logic
-from .core import VolumeSpiller
-from .utils import (
-    DataProfiler,
-    frame_shape,
-    clean_column_names,
-    keep_duplicates,
-    is_unique,
-    glimpse,
-    apply_column_comments,
-    display2
-)
+import polars as pl
 
 # Import types for aliasing
 from pyspark.sql import DataFrame as SparkDataFrame
-import polars as pl
+
+from .core import VolumeSpiller
+from .utils import (
+    DataProfiler,
+    apply_column_comments,
+    clean_column_names,
+    display2,
+    frame_shape,
+    glimpse,
+    is_unique,
+    keep_duplicates,
+)
 
 __all__ = [
     "VolumeSpiller",
@@ -24,5 +25,5 @@ __all__ = [
     "is_unique",
     "glimpse",
     "apply_column_comments",
-    "display2"
+    "display2",
 ]
