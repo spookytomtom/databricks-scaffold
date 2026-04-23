@@ -77,8 +77,11 @@ class FakeWorkspaceClient:
 
 def _local_spark_available():
     """True only when standalone pyspark (not databricks-connect) is present."""
-    if importlib.util.find_spec("databricks.connect") is not None:
-        return False
+    try:
+        if importlib.util.find_spec("databricks.connect") is not None:
+            return False
+    except ModuleNotFoundError:
+        pass
     return importlib.util.find_spec("pyspark") is not None
 
 
