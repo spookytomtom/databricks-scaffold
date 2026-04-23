@@ -70,36 +70,38 @@ def _is_databricks_connect(spark) -> bool:
     """
     Detects whether the given SparkSession is a Databricks Connect (remote) session.
 
-    Uses three checks in order:
-    1. isinstance against DatabricksSession (when the package is importable).
-    2. Module-name match against known Connect session module paths.
-    3. Presence of a `client` attribute that Connect sessions carry.
+    The definitive signal is the ``spark.remote`` configuration key, which is only
+    present when the session connects to a remote cluster.  On recent DBR runtimes
+    (14+) *databricks.connect* is pre-installed and the on-cluster SparkSession is
+    actually a DatabricksSession subclass, so isinstance / module-name checks alone
+    produce false positives.
 
-    Returns False only when none of the checks match. Logs a warning when
-    databricks.connect is importable but all checks still fail, which indicates
-    an unexpected Databricks API change.
+    Falls back to module-name and duck-type checks when spark.remote is absent
+    (older runtimes where the package might not even be importable).
     """
-    module = type(spark).__module__
+    try:
+        spark.conf.get("spark.remote")
+        return True
+    except Exception:
+        pass
 
-    # Check 2: module-name match (fast, no import needed).
+    module = type(spark).__module__
     if module in _CONNECT_SESSION_MODULES:
         return True
 
-    # Check 1: isinstance — requires the package to be present.
     try:
         from databricks.connect.session import DatabricksSession
 
         if isinstance(spark, DatabricksSession):
-            return True
-        # Check 3: structural duck-type — Connect sessions expose a gRPC client.
-        if getattr(spark, "client", None) is not None or getattr(spark, "_client", None) is not None:
+            if getattr(spark, "client", None) is not None or getattr(spark, "_client", None) is not None:
+                return True
             _logger.warning(
-                "databricks.connect is installed but session module %r did not match "
-                "known paths and isinstance check failed. Treating as Connect session. "
-                "This may indicate a Databricks API change — please report it.",
+                "databricks.connect is importable and session is a DatabricksSession, "
+                "but spark.remote is not set and no gRPC client attribute found. "
+                "Treating as on-cluster session. Module: %r",
                 module,
             )
-            return True
+            return False
         return False
     except ImportError:
         return False
@@ -282,13 +284,13 @@ class VolumeSpiller:
 
         def _download_one(entry) -> None:
             dst = str(Path(local_dir) / entry.name)
-            _retry_op(
-                lambda: self._workspace.files.download_to(
-                    file_path=entry.path,
-                    destination=dst,
-                    use_parallel=True,
-                )
-            )
+
+            def _do_download():
+                resp = self._workspace.files.download(file_path=entry.path)
+                with open(dst, "wb") as f:
+                    shutil.copyfileobj(resp.contents, f)
+
+            _retry_op(_do_download)
 
         # max_workers=8 balances throughput vs. rate-limit pressure; more threads
         # increase 429 risk on the Files API.  as_completed + result() gives
@@ -312,14 +314,16 @@ class VolumeSpiller:
         def _upload_one(name: str) -> None:
             src = str(Path(local_dir) / name)
             dst = f"{volume_dir}/{name}"
-            _retry_op(
-                lambda: self._workspace.files.upload_from(
-                    file_path=dst,
-                    source_path=src,
-                    overwrite=True,
-                    use_parallel=True,
-                )
-            )
+
+            def _do_upload():
+                with open(src, "rb") as f:
+                    self._workspace.files.upload(
+                        file_path=dst,
+                        contents=f,
+                        overwrite=True,
+                    )
+
+            _retry_op(_do_upload)
 
         # Same rationale as _download_volume_dir: 8 threads, fail-fast on first
         # error.  Fail-fast matters here because the old checkpoint is already
