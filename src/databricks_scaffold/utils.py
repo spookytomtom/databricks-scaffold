@@ -1,3 +1,5 @@
+import contextlib
+import io
 import logging
 import re
 from typing import Any
@@ -499,6 +501,9 @@ def display2(df: Any, is_dev: bool | None = None) -> None:
     if hasattr(df, "show"):
         df.show()
     elif hasattr(df, "glimpse"):
-        _logger.info(df.glimpse())
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            df.glimpse()
+        _logger.info(buf.getvalue().rstrip())
     else:
         _logger.info("%s", df)

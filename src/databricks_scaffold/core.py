@@ -173,6 +173,8 @@ class VolumeSpiller:
         self.local_base_dir = Path(tempfile.gettempdir()) / "databricks-scaffold" / user
         self.local_base_dir.mkdir(parents=True, exist_ok=True)
 
+        self._is_connect = _is_databricks_connect(self.spark)
+
         try:
             if self.is_dev:
                 self.spark.sql(f"CREATE VOLUME IF NOT EXISTS {self.full_name}")
@@ -190,7 +192,6 @@ class VolumeSpiller:
                 ) from exc
             raise
 
-        self._is_connect = _is_databricks_connect(self.spark)
         self._active_local_dirs: list[str] = []
         self._active_volume_dirs: list[str] = []
         self._workspace_client = workspace_client
@@ -456,10 +457,10 @@ class VolumeSpiller:
             TypeError: If df is not a Polars DataFrame/LazyFrame.
             ValueError: If name is empty or invalid.
         """
-        df = self._prepare_polars_timestamps(df)
-
         if not isinstance(df, (pl.DataFrame, pl.LazyFrame)):
             raise TypeError(f"df must be pl.DataFrame or pl.LazyFrame, got {type(df).__name__}")
+
+        df = self._prepare_polars_timestamps(df)
 
         if not isinstance(name, str) or not name.strip():
             raise ValueError("name must be a non-empty string")
@@ -583,7 +584,8 @@ class VolumeSpiller:
         Args:
             df (SparkDataFrame): The PySpark DataFrame to save.
             name (str): The name of the checkpoint directory.
-            optimize_files (bool, optional): If True, coalesces the DataFrame to 2 partitions before writing. Defaults to False.
+            optimize_files (bool, optional): If True, coalesces the DataFrame to 2
+                partitions before writing. Defaults to False.
 
         Raises:
             TypeError: If arguments are of incorrect types.
@@ -695,6 +697,8 @@ class VolumeSpiller:
         Returns:
             pl.DataFrame | pl.LazyFrame
         """
+        if not isinstance(df, _DF_TYPES):
+            raise TypeError(f"Expected a Spark DataFrame, got {type(df).__name__}")
         run_id = uuid.uuid4().hex
         volume_temp_dir = self.get_path(f"spill_sp_pl_{run_id}")
         track_volume = not (cleanup and eager)
@@ -747,6 +751,9 @@ class VolumeSpiller:
         Returns:
             SparkDataFrame
         """
+        if not isinstance(df, (pl.DataFrame, pl.LazyFrame)):
+            raise TypeError(f"Expected pl.DataFrame or pl.LazyFrame, got {type(df).__name__}")
+
         run_id = uuid.uuid4().hex
         volume_temp_dir = self.get_path(f"spill_pl_sp_{run_id}")
         self._active_volume_dirs.append(volume_temp_dir)
