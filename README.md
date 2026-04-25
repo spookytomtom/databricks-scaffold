@@ -55,15 +55,19 @@ Volume operations that would otherwise require local `/Volumes/...` filesystem a
 ### `VolumeSpiller`
 Uses a Unity Catalog Volume (or local driver `/tmp`) as a Parquet spill buffer to move data between Spark and Polars without collecting through the driver.
 
+**Constructor:** `VolumeSpiller(spark, catalog, schema, volume_name, is_dev=None, workspace_client=None)`
+
+- `workspace_client` — optional pre-constructed `databricks.sdk.WorkspaceClient`. Use this when connecting via Databricks Connect with a non-default profile, custom host, PAT token, or OAuth. If not provided, the SDK's default auth chain is used.
+
 | Method | Description |
 |--------|-------------|
-| `spark_to_polars(df, eager, cleanup, optimize_files)` | Write Spark DF to Volume as Parquet, read back as Polars `DataFrame` or `LazyFrame` |
+| `spark_to_polars(df, cleanup=False, eager=True, optimize_files=False)` | Write Spark DF to Volume as Parquet, read back as Polars `DataFrame` or `LazyFrame` |
 | `polars_to_spark(df)` | Write Polars DF to Volume as Parquet, read back as Spark `DataFrame` |
-| `save_checkpoint_pl(df, name, storage, compression)` | Persist a Polars DF/LazyFrame to a named checkpoint on Volume or local `/tmp` |
-| `load_checkpoint_pl(name, eager, storage)` | Load a named Polars checkpoint back as `DataFrame` or `LazyFrame` |
-| `save_checkpoint_spark(df, name, optimize_files)` | Persist a Spark DF to a named checkpoint on the Volume |
+| `save_checkpoint_pl(df, name, storage="volume", compression="auto")` | Persist a Polars DF/LazyFrame to a named checkpoint on Volume or local `/tmp` |
+| `load_checkpoint_pl(name, eager=True, storage="volume")` | Load a named Polars checkpoint back as `DataFrame` or `LazyFrame` |
+| `save_checkpoint_spark(df, name, optimize_files=False)` | Persist a Spark DF to a named checkpoint on the Volume |
 | `load_checkpoint_spark(name)` | Load a named Spark checkpoint |
-| `list_checkpoints(storage)` | List all checkpoint names in Volume or local storage |
+| `list_checkpoints(storage="volume")` | List all checkpoint names in Volume or local storage |
 | `teardown()` | Delete temp spill dirs and (in prod) drop the Volume |
 | `get_path(name)` | Resolve the absolute Volume path for a given name |
 
@@ -77,6 +81,14 @@ Uses a Unity Catalog Volume (or local driver `/tmp`) as a Parquet spill buffer t
 
 `VolumeSpiller` and `display2()` both read `IS_DEV` from the notebook namespace automatically. You never need to pass it as an argument. Override per-instance with `VolumeSpiller(..., is_dev=False)` if needed.
 
+**Context manager support:**
+
+```python
+with VolumeSpiller(spark, "main", "default", "my_vol") as spill:
+    pl_df = spill.spark_to_polars(spark_df)
+# teardown() called automatically
+```
+
 ---
 
 ### `DataProfiler`
@@ -84,6 +96,7 @@ Generates a column-level summary (missing values, unique counts, top frequent va
 
 | Method | Description |
 |--------|-------------|
+| `DataProfiler(top_n=3)` | Constructor. `top_n` sets how many top frequent values to show per column |
 | `profile(df, output="print")` | Auto-detects Polars vs Spark. `output="print"` prints to console; `output="dataframe"` returns a summary DataFrame |
 
 ---
