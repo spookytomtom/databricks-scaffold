@@ -13,9 +13,7 @@ from databricks_scaffold.core import VolumeSpiller
 try:
     from databricks.sdk.errors import NotFound as _SdkNotFound
 except ImportError:
-
-    class _SdkNotFound(OSError):  # type: ignore[assignment]
-        pass
+    _SdkNotFound = _core._SdkNotFound
 
 
 class FakeFilesAPI:
@@ -25,6 +23,18 @@ class FakeFilesAPI:
     the difference. Raises the real databricks.sdk.errors.NotFound (an OSError
     subclass) for missing paths, matching what the SDK raises in production.
     """
+
+    def upload(self, file_path, contents, overwrite=True):
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        if not overwrite and os.path.exists(file_path):
+            raise FileExistsError(file_path)
+        with open(file_path, "wb") as f:
+            shutil.copyfileobj(contents, f)
+
+    def download(self, file_path):
+        if not os.path.exists(file_path):
+            raise _SdkNotFound(file_path)
+        return SimpleNamespace(contents=open(file_path, "rb"))
 
     def upload_from(self, file_path, source_path, overwrite=True, use_parallel=True, parallelism=None, part_size=None):
         os.makedirs(os.path.dirname(file_path), exist_ok=True)
@@ -76,13 +86,17 @@ class FakeWorkspaceClient:
 
 
 def _local_spark_available():
-    """True only when standalone pyspark (not databricks-connect) is present."""
+    """True only when standalone pyspark (not databricks-connect) is present and functional."""
     try:
         if importlib.util.find_spec("databricks.connect") is not None:
             return False
     except ModuleNotFoundError:
         pass
-    return importlib.util.find_spec("pyspark") is not None
+    if importlib.util.find_spec("pyspark") is None:
+        return False
+    # PySpark requires a JVM. If JAVA_HOME is unset and 'java' is not on PATH,
+    # SparkSession construction will fail even though the module is importable.
+    return bool(os.environ.get("JAVA_HOME") or shutil.which("java"))
 
 
 def pytest_configure(config):
@@ -102,7 +116,13 @@ def pytest_collection_modifyitems(config, items):
 
 @pytest.fixture(scope="session")
 def spark():
-    """MagicMock stand-in for SparkSession. Tests needing a real session are marked requires_pyspark."""
+    """Return a real SparkSession when standalone pyspark is available, otherwise MagicMock."""
+    if _local_spark_available():
+        from pyspark.sql import SparkSession
+        try:
+            return SparkSession.builder.getOrCreate()
+        except Exception:
+            pass
     return MagicMock()
 
 

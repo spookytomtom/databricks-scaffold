@@ -76,12 +76,16 @@ def _is_databricks_connect(spark) -> bool:
     actually a DatabricksSession subclass, so isinstance / module-name checks alone
     produce false positives.
 
-    Falls back to module-name and duck-type checks when spark.remote is absent
-    (older runtimes where the package might not even be importable).
+    Falls back to the following checks when spark.remote is absent (older runtimes
+    where the package might not even be importable):
+
+    1. Module-name match against known Connect session module paths.
+    2. isinstance against DatabricksSession, verified by the presence of a gRPC client.
     """
     try:
-        spark.conf.get("spark.remote")
-        return True
+        remote = spark.conf.get("spark.remote")
+        if isinstance(remote, str) and remote.strip():
+            return True
     except Exception:
         pass
 
@@ -475,6 +479,11 @@ class VolumeSpiller:
                 "names must only contain alphanumeric characters, underscores, or hyphens."
             )
 
+        if compression not in {"auto", "zstd", "snappy", "uncompressed"}:
+            raise ValueError(
+                f"Invalid compression '{compression}'. Must be one of: auto, zstd, snappy, uncompressed."
+            )
+
         base_path, resolved_storage = self._resolve_path(name, storage)
 
         if compression == "auto":
@@ -546,7 +555,10 @@ class VolumeSpiller:
             FileNotFoundError: If the checkpoint directory does not exist.
             ValueError: If name is invalid or storage is unsupported.
         """
-        if not isinstance(name, str) or not re.match(r"^[\w\-]+$", name):
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("name must be a non-empty string")
+
+        if not re.match(r"^[\w\-]+$", name):
             raise ValueError(
                 f"Invalid checkpoint name '{name}'. Names must only contain "
                 "alphanumeric characters, underscores, or hyphens."
