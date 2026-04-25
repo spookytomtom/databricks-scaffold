@@ -29,8 +29,9 @@ def test_checkpoint_roundtrip_polars(spiller):
     assert df.equals(loaded_df)
 
 
-def test_nanosecond_autofix(spiller, capsys):
+def test_nanosecond_autofix(spiller, caplog):
     """Ensure ns timestamps are auto-converted to ms (Spark compatibility)."""
+    caplog.set_level("INFO")
     # create a DF with nanosecond precision
     df = pl.DataFrame({"ts": [datetime(2023, 1, 1, 12, 0, 0)]}).with_columns(pl.col("ts").cast(pl.Datetime("ns")))
 
@@ -38,8 +39,7 @@ def test_nanosecond_autofix(spiller, capsys):
     spiller.save_checkpoint_pl(df, name="ns_test")
 
     # Check if the warning was printed
-    captured = capsys.readouterr()
-    assert "Auto-fix: Casting" in captured.out
+    assert "Auto-fix: Casting" in caplog.text
 
     # Load back and verify it's now ms or us (parquet standard), not ns
     loaded = spiller.load_checkpoint_pl("ns_test")

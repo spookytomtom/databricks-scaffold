@@ -217,20 +217,19 @@ def test_polars_to_spark_full_roundtrip_with_spark_to_polars(spiller_connect, sp
     assert [r["txt"] for r in rows] == ["a", "b"]
 
 
-def test_resolve_path_volume_under_connect_does_not_call_os_makedirs(spiller_connect, monkeypatch):
-    calls = {"os_makedirs": 0}
-    real_makedirs = os.makedirs
+def test_resolve_path_volume_under_connect_uses_files_api(spiller_connect, monkeypatch):
+    calls = {"create_directory": 0}
+    real_create_directory = spiller_connect._workspace.files.create_directory
 
-    def tracking_makedirs(path, *a, **kw):
-        if str(path).startswith(str(spiller_connect.volume_root)):
-            calls["os_makedirs"] += 1
-        return real_makedirs(path, *a, **kw)
+    def tracking_create_directory(path):
+        calls["create_directory"] += 1
+        return real_create_directory(path)
 
-    monkeypatch.setattr(os, "makedirs", tracking_makedirs)
+    monkeypatch.setattr(spiller_connect._workspace.files, "create_directory", tracking_create_directory)
 
     path, storage = spiller_connect._resolve_path("some_ckpt", "volume")
     assert storage == "volume"
-    assert calls["os_makedirs"] == 0
+    assert calls["create_directory"] == 1
     assert os.path.isdir(path)
 
 
@@ -269,7 +268,7 @@ def test_save_checkpoint_pl_upload_failure_preserves_old_checkpoint(spiller_conn
     def _fail(*args, **kwargs):
         raise RuntimeError("simulated network error")
 
-    monkeypatch.setattr(spiller_connect._workspace_client.files, "upload_from", _fail)
+    monkeypatch.setattr(spiller_connect._workspace_client.files, "upload", _fail)
 
     with pytest.raises(RuntimeError, match="simulated network error"):
         spiller_connect.save_checkpoint_pl(df_new, name="ckpt_c4", storage="volume")
@@ -312,17 +311,22 @@ def test_list_checkpoints_volume_under_connect(spiller_connect, monkeypatch):
     spiller_connect.save_checkpoint_pl(df, name="ckpt_a", storage="volume")
     spiller_connect.save_checkpoint_pl(df, name="ckpt_b", storage="volume")
 
-    real_listdir = os.listdir
+    calls = {"list_directory_contents": 0}
+    real_list_directory_contents = spiller_connect._workspace.files.list_directory_contents
 
-    def guarded_listdir(path):
-        if str(path).startswith(str(spiller_connect.volume_root)):
-            raise AssertionError(f"os.listdir called on volume path: {path}")
-        return real_listdir(path)
+    def tracking_list_directory_contents(path):
+        calls["list_directory_contents"] += 1
+        return real_list_directory_contents(path)
 
-    monkeypatch.setattr(os, "listdir", guarded_listdir)
+    monkeypatch.setattr(
+        spiller_connect._workspace.files,
+        "list_directory_contents",
+        tracking_list_directory_contents,
+    )
 
     names = spiller_connect.list_checkpoints(storage="volume")
     assert sorted(names) == ["ckpt_a", "ckpt_b"]
+    assert calls["list_directory_contents"] == 1
 
 
 def test_list_checkpoints_local_under_connect(spiller_connect):
@@ -373,7 +377,10 @@ def test_load_checkpoint_spark_under_connect_does_not_call_os_path_exists_on_vol
 
 def test_retry_op_succeeds_after_transient_failures(monkeypatch):
     """_retry_op retries on transient SDK errors and returns the successful result."""
-    from databricks.sdk.errors import ResourceExhausted
+    ResourceExhausted = pytest.importorskip(
+        "databricks.sdk.errors",
+        reason="databricks SDK not installed",
+    ).ResourceExhausted
 
     monkeypatch.setattr("databricks_scaffold.core.time.sleep", lambda _: None)
 
@@ -392,7 +399,10 @@ def test_retry_op_succeeds_after_transient_failures(monkeypatch):
 
 def test_retry_op_raises_after_max_retries_exhausted(monkeypatch):
     """_retry_op raises the last exception when max retries are exhausted."""
-    from databricks.sdk.errors import ResourceExhausted
+    ResourceExhausted = pytest.importorskip(
+        "databricks.sdk.errors",
+        reason="databricks SDK not installed",
+    ).ResourceExhausted
 
     monkeypatch.setattr("databricks_scaffold.core.time.sleep", lambda _: None)
 
@@ -405,7 +415,10 @@ def test_retry_op_raises_after_max_retries_exhausted(monkeypatch):
 
 def test_retry_op_propagates_non_retryable_errors_immediately(monkeypatch):
     """_retry_op does not retry errors outside _RETRYABLE_SDK_ERRORS."""
-    from databricks.sdk.errors import PermissionDenied
+    PermissionDenied = pytest.importorskip(
+        "databricks.sdk.errors",
+        reason="databricks SDK not installed",
+    ).PermissionDenied
 
     monkeypatch.setattr("databricks_scaffold.core.time.sleep", lambda _: None)
 
@@ -423,7 +436,10 @@ def test_retry_op_propagates_non_retryable_errors_immediately(monkeypatch):
 
 def test_upload_dir_retries_on_transient_error(spiller_connect, tmp_path, monkeypatch):
     """Single-file upload retries a 429 and ultimately succeeds."""
-    from databricks.sdk.errors import ResourceExhausted
+    ResourceExhausted = pytest.importorskip(
+        "databricks.sdk.errors",
+        reason="databricks SDK not installed",
+    ).ResourceExhausted
 
     monkeypatch.setattr("databricks_scaffold.core.time.sleep", lambda _: None)
 
@@ -432,7 +448,7 @@ def test_upload_dir_retries_on_transient_error(spiller_connect, tmp_path, monkey
     (local_src / "part-0.parquet").write_bytes(b"data")
 
     attempt_counts = {"n": 0}
-    real_upload = spiller_connect._workspace_client.files.upload_from
+    real_upload = spiller_connect._workspace_client.files.upload
 
     def flaky_upload(*args, **kwargs):
         attempt_counts["n"] += 1
@@ -440,7 +456,7 @@ def test_upload_dir_retries_on_transient_error(spiller_connect, tmp_path, monkey
             raise ResourceExhausted("rate limited")
         return real_upload(*args, **kwargs)
 
-    monkeypatch.setattr(spiller_connect._workspace_client.files, "upload_from", flaky_upload)
+    monkeypatch.setattr(spiller_connect._workspace_client.files, "upload", flaky_upload)
 
     remote = f"{spiller_connect.volume_root}/retry_upload"
     spiller_connect._upload_dir_to_volume(str(local_src), remote)
@@ -451,7 +467,10 @@ def test_upload_dir_retries_on_transient_error(spiller_connect, tmp_path, monkey
 
 def test_upload_dir_raises_after_exhausted_retries(spiller_connect, tmp_path, monkeypatch):
     """Upload raises after all retry attempts are exhausted."""
-    from databricks.sdk.errors import ResourceExhausted
+    ResourceExhausted = pytest.importorskip(
+        "databricks.sdk.errors",
+        reason="databricks SDK not installed",
+    ).ResourceExhausted
 
     monkeypatch.setattr("databricks_scaffold.core.time.sleep", lambda _: None)
 
@@ -462,7 +481,7 @@ def test_upload_dir_raises_after_exhausted_retries(spiller_connect, tmp_path, mo
     def always_fails(*args, **kwargs):
         raise ResourceExhausted("always fails")
 
-    monkeypatch.setattr(spiller_connect._workspace_client.files, "upload_from", always_fails)
+    monkeypatch.setattr(spiller_connect._workspace_client.files, "upload", always_fails)
 
     remote = f"{spiller_connect.volume_root}/retry_exhausted"
     with pytest.raises(ResourceExhausted):
@@ -512,6 +531,7 @@ def test_df_types_includes_connect_dataframe():
     ConnectDataFrame = pytest.importorskip(
         "pyspark.sql.connect.dataframe",
         reason="pyspark.sql.connect not available",
+        exc_type=ImportError,
     ).DataFrame
     assert ConnectDataFrame in _core._DF_TYPES
 
@@ -523,6 +543,7 @@ def test_save_checkpoint_spark_accepts_connect_dataframe(spiller_connect, monkey
     ConnectDataFrame = pytest.importorskip(
         "pyspark.sql.connect.dataframe",
         reason="pyspark.sql.connect not available",
+        exc_type=ImportError,
     ).DataFrame
 
     # object.__new__ bypasses ConnectDataFrame.__init__ (which needs a gRPC plan/session)

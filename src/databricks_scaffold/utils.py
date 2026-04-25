@@ -47,11 +47,9 @@ class DataProfiler:
         Raises:
             ValueError: If the input DataFrame type is not supported.
         """
-        df_type = str(type(df)).lower()
-
-        if "polars" in df_type:
+        if isinstance(df, pl.DataFrame):
             return self._profile_polars(df, output)
-        elif "pyspark" in df_type:
+        elif isinstance(df, SparkDataFrame):
             return self._profile_pyspark(df, output)
         else:
             raise ValueError(f"Unsupported type: {type(df)}. Please pass Polars or PySpark.")
@@ -483,7 +481,7 @@ def display2(df: Any, is_dev: bool | None = None) -> None:
 
     # 3. Handle Polars to ensure it renders correctly in the Databricks UI
     display_target = df
-    if "polars" in str(type(df)).lower() and hasattr(df, "to_pandas"):
+    if isinstance(df, (pl.DataFrame, pl.LazyFrame)) and hasattr(df, "to_pandas"):
         display_target = df.to_pandas()
 
     # 4. Execute display with a clean fallback
