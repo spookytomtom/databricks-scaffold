@@ -656,6 +656,40 @@ class VolumeSpiller:
             raise FileNotFoundError(f"Checkpoint '{name}' not found at {checkpoint_dir}")
         return self.spark.read.parquet(checkpoint_dir)
 
+    def delete_checkpoint(self, name: str, storage: str = "volume") -> None:
+        """
+        Deletes a named checkpoint from volume or local storage.
+
+        Args:
+            name (str): The name of the checkpoint to delete.
+            storage (str, optional): 'volume' or 'local'. Defaults to 'volume'.
+
+        Raises:
+            FileNotFoundError: If the checkpoint does not exist.
+            ValueError: If name is invalid or storage is unsupported.
+        """
+        if not isinstance(name, str) or not re.match(r"^[\w\-]+$", name):
+            raise ValueError(
+                f"Invalid checkpoint name '{name}'. Names must only contain "
+                "alphanumeric characters, underscores, or hyphens."
+            )
+
+        if storage not in ("volume", "local"):
+            raise ValueError("storage must be 'volume' or 'local'")
+
+        if storage == "volume":
+            checkpoint_dir = self.get_path(name)
+            if not self._volume_exists(checkpoint_dir):
+                raise FileNotFoundError(f"Checkpoint '{name}' not found at {checkpoint_dir}")
+            self._volume_rmtree(checkpoint_dir)
+        else:
+            checkpoint_dir = self.local_base_dir / name
+            if not checkpoint_dir.is_dir():
+                raise FileNotFoundError(f"Checkpoint '{name}' not found at {checkpoint_dir}")
+            shutil.rmtree(checkpoint_dir)
+
+        _logger.info("Checkpoint '%s' deleted from %s storage.", name, storage)
+
     def __enter__(self):
         return self
 

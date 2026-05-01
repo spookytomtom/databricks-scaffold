@@ -370,6 +370,32 @@ def test_load_checkpoint_spark_under_connect_does_not_call_os_path_exists_on_vol
     assert loaded.count() == 1
 
 
+def test_delete_checkpoint_volume_under_connect(spiller_connect):
+    """Delete an existing volume checkpoint under Connect."""
+    df = pl.DataFrame({"id": [1, 2, 3]})
+    spiller_connect.save_checkpoint_pl(df, name="del_vol_connect", storage="volume")
+    assert "del_vol_connect" in spiller_connect.list_checkpoints(storage="volume")
+
+    spiller_connect.delete_checkpoint("del_vol_connect", storage="volume")
+    assert "del_vol_connect" not in spiller_connect.list_checkpoints(storage="volume")
+
+
+def test_delete_checkpoint_local_under_connect(spiller_connect):
+    """Delete an existing local checkpoint under Connect."""
+    df = pl.DataFrame({"id": [1, 2, 3]})
+    spiller_connect.save_checkpoint_pl(df, name="del_loc_connect", storage="local")
+    assert "del_loc_connect" in spiller_connect.list_checkpoints(storage="local")
+
+    spiller_connect.delete_checkpoint("del_loc_connect", storage="local")
+    assert "del_loc_connect" not in spiller_connect.list_checkpoints(storage="local")
+
+
+def test_delete_checkpoint_missing_raises_under_connect(spiller_connect):
+    """Deleting nonexistent checkpoint under Connect raises FileNotFoundError."""
+    with pytest.raises(FileNotFoundError, match="not found"):
+        spiller_connect.delete_checkpoint("absent_connect", storage="volume")
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # I1: parallel uploads/downloads with exponential-backoff retry
 # ──────────────────────────────────────────────────────────────────────────────
