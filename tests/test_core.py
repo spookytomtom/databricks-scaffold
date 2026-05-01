@@ -81,6 +81,44 @@ def test_error_handling_invalid_storage(spiller):
         spiller.save_checkpoint_pl(df, "bad_store", storage="cloud")
 
 
+def test_delete_checkpoint_volume(spiller):
+    """Delete an existing volume checkpoint."""
+    df = pl.DataFrame({"id": [1, 2, 3]})
+    spiller.save_checkpoint_pl(df, name="to_delete_vol")
+    assert "to_delete_vol" in spiller.list_checkpoints(storage="volume")
+
+    spiller.delete_checkpoint("to_delete_vol", storage="volume")
+    assert "to_delete_vol" not in spiller.list_checkpoints(storage="volume")
+
+
+def test_delete_checkpoint_local(spiller):
+    """Delete an existing local checkpoint."""
+    df = pl.DataFrame({"id": [1, 2, 3]})
+    spiller.save_checkpoint_pl(df, name="to_delete_loc", storage="local")
+    assert "to_delete_loc" in spiller.list_checkpoints(storage="local")
+
+    spiller.delete_checkpoint("to_delete_loc", storage="local")
+    assert "to_delete_loc" not in spiller.list_checkpoints(storage="local")
+
+
+def test_delete_checkpoint_missing_raises(spiller):
+    """Deleting a nonexistent checkpoint raises FileNotFoundError."""
+    with pytest.raises(FileNotFoundError, match="not found"):
+        spiller.delete_checkpoint("nonexistent", storage="volume")
+
+
+def test_delete_checkpoint_invalid_name_raises(spiller):
+    """Invalid checkpoint name raises ValueError."""
+    with pytest.raises(ValueError, match="Invalid checkpoint name"):
+        spiller.delete_checkpoint("../bad", storage="volume")
+
+
+def test_delete_checkpoint_invalid_storage_raises(spiller):
+    """Invalid storage raises ValueError."""
+    with pytest.raises(ValueError, match="storage must be"):
+        spiller.delete_checkpoint("valid_name", storage="cloud")
+
+
 def test_is_dev_default_arg_uses_resolved_value(spark, monkeypatch):
     """Regression: VolumeSpiller(spark, ...) with no is_dev kwarg must not issue DROP VOLUME
     even when _resolve_is_dev returns True (simulating IS_DEV=True in notebook namespace)."""

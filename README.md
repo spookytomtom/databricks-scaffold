@@ -68,6 +68,7 @@ Uses a Unity Catalog Volume (or local driver `/tmp`) as a Parquet spill buffer t
 | `save_checkpoint_spark(df, name, optimize_files=False)` | Persist a Spark DF to a named checkpoint on the Volume |
 | `load_checkpoint_spark(name)` | Load a named Spark checkpoint |
 | `list_checkpoints(storage="volume")` | List all checkpoint names in Volume or local storage |
+| `delete_checkpoint(name, storage="volume")` | Delete a named checkpoint from Volume or local storage |
 | `teardown()` | Delete temp spill dirs and (in prod) drop the Volume |
 | `get_path(name)` | Resolve the absolute Volume path for a given name |
 
