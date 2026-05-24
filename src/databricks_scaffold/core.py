@@ -177,7 +177,19 @@ class VolumeSpiller:
         self.volume_root = f"/Volumes/{catalog}/{schema}/{volume_name}"
         user = getpass.getuser().replace("\\", "_").replace("/", "_")
         self.local_base_dir = Path(tempfile.gettempdir()) / "databricks-scaffold" / user
-        self.local_base_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            self.local_base_dir.mkdir(parents=True, exist_ok=True)
+        except PermissionError as exc:
+            raise PermissionError(
+                f"Cannot create local temp directory {self.local_base_dir}. "
+                "On Databricks, this usually means the notebook is running on a "
+                "cluster in Shared (Standard) access mode, which restricts Python's "
+                "filesystem access. Either switch the cluster to Single User "
+                "(Dedicated) access mode, use Serverless compute, or upgrade to "
+                "Databricks Runtime 14.3 LTS or above where some restrictions are "
+                "relaxed. If you only need Volume storage (not local checkpoints), "
+                "ensure no code calls methods with storage='local'."
+            ) from exc
 
         self._is_connect = _is_databricks_connect(self.spark)
 

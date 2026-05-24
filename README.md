@@ -334,6 +334,25 @@ display2(pandas_df)
 
 ---
 
+### Troubleshooting: `PermissionError` on cluster
+
+If `VolumeSpiller` throws a `PermissionError` when trying to create a local temp directory (`/tmp/databricks-scaffold/...`), the most likely cause is **Shared (Standard) access mode** on the cluster.
+
+Shared mode restricts Python's filesystem access on the driver node. This affects:
+
+- **Local checkpoint storage** (`storage="local"`) — writes to the driver's `/tmp`, which is sandboxed on Shared clusters.
+- **VolumeSpiller construction** — creates a local temp directory unconditionally, even if you only ever use Volume storage.
+
+**Solutions (pick one):**
+
+| Option | How |
+|--------|-----|
+| Switch the cluster to **Single User (Dedicated)** access mode | Databricks UI → Clusters → Edit → Access Mode → Single User |
+| Use **Serverless** compute for the job | No sandbox restrictions on `/tmp` |
+| Upgrade to **Databricks Runtime 14.3 LTS+** on Shared mode | Some filesystem restrictions are relaxed in newer runtimes |
+
+If you only use Volume storage (`storage="volume"`, the default) and never `storage="local"`, switching to Single User access mode or Serverless is the simplest fix. The Unity Catalog Volume path (`/Volumes/...`) is accessible via FUSE on Single User clusters.
+
 ### Production pattern
 
 In a Databricks job, define a widget parameter `IS_DEV` with value `False`. The library reads it automatically — no code changes required between dev and prod.
