@@ -234,6 +234,41 @@ class VolumeSpiller:
         self._drop_on_error = drop_on_error
         if self.is_dev:
             atexit.register(self.teardown)
+        if drop_on_error:
+            self._install_error_hooks()
+
+    def _install_error_hooks(self) -> None:
+        """Install cleanup hooks for automatic volume drop on error or exit.
+
+        Registers two complementary hooks:
+          * atexit — drops the volume at clean process/kernel exit (backstop).
+            Only registered in prod mode; dev mode already registers atexit
+            via __init__.
+          * IPython custom exception handler — fires on any uncaught cell
+            error while the Spark session is still alive. Calls teardown()
+            then re-shows the traceback so the cell/job still reports failure.
+
+        teardown() is idempotent (guarded by self._torn_down), so multiple
+        trigger paths are safe.
+        """
+        if not self.is_dev:
+            atexit.register(self.teardown)
+
+        if get_ipython is not None:
+            try:
+                ip = get_ipython()
+            except Exception:
+                ip = None
+            if ip is not None:
+                spiller = self
+
+                def _cleanup_on_error(shell, etype, evalue, tb, tb_offset=None):
+                    try:
+                        spiller.teardown()
+                    finally:
+                        shell.showtraceback((etype, evalue, tb), tb_offset=tb_offset)
+
+                ip.set_custom_exc((Exception,), _cleanup_on_error)
 
     @property
     def _workspace(self):
