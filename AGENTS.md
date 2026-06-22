@@ -71,6 +71,7 @@ The library bridges PySpark and Polars by writing Parquet to Unity Catalog Volum
   - `spark_to_polars()` / `polars_to_spark()`: Write Parquet to volume, read back with other engine. Temp dirs tracked in `_active_volume_dirs`, cleaned on `teardown()`. Note: `polars_to_spark()` is volume-only (no `local` option).
   - `save_checkpoint_pl` / `load_checkpoint_pl`: Support both `volume` and `local` storage. `save_checkpoint_spark` / `load_checkpoint_spark` are volume-only. `delete_checkpoint` removes a named checkpoint from either storage tier; `list_checkpoints` enumerates them.
   - `teardown()`: Clears local `/tmp` driver storage tracked in `_active_local_dirs`. Volume cleanup is conditional on `IS_DEV` (preserved in dev, dropped in prod).
+  - `drop_on_error` constructor flag (default `False`): when `True`, installs an IPython custom exception handler and `atexit` backstop that call `teardown()` automatically on any uncaught notebook error or at process exit. Drops the volume in **both** dev and prod modes (overrides the default dev-preserve behavior). Eliminates the need for `try/finally` boilerplate in notebooks. Under Databricks Connect as a plain script (no IPython kernel), only the `atexit` backstop fires — use `with`/`try/finally` in that scenario.
   - `_prepare_polars_timestamps()`: Auto-casts Polars `ns`/`us` Datetime to `ms` + UTC before writing.
   - Checkpoint names validated with `^[\w\-]+$` (underscores/hyphens only — no slashes or dots).
 
