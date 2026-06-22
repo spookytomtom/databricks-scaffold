@@ -33,6 +33,12 @@ except ImportError:
 
 
 try:
+    from IPython import get_ipython
+except ImportError:
+    get_ipython = None
+
+
+try:
     from databricks.sdk.errors import (
         InternalError as _SdkInternalError,  # 5xx — transient server error
     )
@@ -150,6 +156,7 @@ class VolumeSpiller:
         volume_name: str,
         is_dev: bool | None = None,
         workspace_client: WorkspaceClient | None = None,
+        drop_on_error: bool = False,
     ):
         """
         Initializes the VolumeSpiller, setting up paths and managing the underlying UC Volume.
@@ -224,6 +231,7 @@ class VolumeSpiller:
         self._active_volume_dirs: list[str] = []
         self._workspace_client = workspace_client
         self._torn_down = False
+        self._drop_on_error = drop_on_error
         if self.is_dev:
             atexit.register(self.teardown)
 
