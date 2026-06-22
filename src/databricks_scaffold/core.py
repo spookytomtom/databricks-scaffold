@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import atexit
 import getpass
 import logging
@@ -10,19 +12,13 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 import polars as pl
-from pyspark.sql import DataFrame as SparkDataFrame
-from pyspark.sql import SparkSession
 
-try:
-    from pyspark.sql.connect.dataframe import DataFrame as ConnectDataFrame
-
-    _DF_TYPES = (SparkDataFrame, ConnectDataFrame)
-except ImportError:
-    ConnectDataFrame = None  # type: ignore[assignment,misc]
-    _DF_TYPES = (SparkDataFrame,)
+if TYPE_CHECKING:
+    from pyspark.sql import DataFrame as SparkDataFrame
+    from pyspark.sql import SparkSession
 
 try:
     from databricks.sdk import WorkspaceClient
@@ -64,6 +60,18 @@ _CONNECT_SESSION_MODULES = frozenset(
         "databricks.connect.session",
     ]
 )
+
+
+def _get_spark_df_types() -> tuple:
+    """Lazily return Spark DataFrame types for isinstance checks. Imports pyspark on first call."""
+    from pyspark.sql import DataFrame as SparkDataFrame
+
+    try:
+        from pyspark.sql.connect.dataframe import DataFrame as ConnectDataFrame
+
+        return (SparkDataFrame, ConnectDataFrame)
+    except ImportError:
+        return (SparkDataFrame,)
 
 
 def _is_databricks_connect(spark) -> bool:
@@ -147,7 +155,7 @@ class VolumeSpiller:
         Initializes the VolumeSpiller, setting up paths and managing the underlying UC Volume.
 
         Args:
-            spark (SparkSession): The active SparkSession. If None, gets or creates one.
+            spark (SparkSession): The active SparkSession. Must be provided; passing None raises ValueError.
             catalog (str): The Unity Catalog name.
             schema (str): The schema (database) name within the catalog.
             volume_name (str): The name of the volume to use for spilling.
@@ -171,7 +179,9 @@ class VolumeSpiller:
                     wc = WorkspaceClient(profile="my-profile")
                     spill = VolumeSpiller(spark, cat, sch, vol, workspace_client=wc)
         """
-        self.spark = spark if spark else SparkSession.builder.getOrCreate()
+        if spark is None:
+            raise ValueError("spark must be provided")
+        self.spark = spark
         self.is_dev = _resolve_is_dev(is_dev)
         self.full_name = f"{catalog}.{schema}.{volume_name}"
         self.volume_root = f"/Volumes/{catalog}/{schema}/{volume_name}"
@@ -618,7 +628,7 @@ class VolumeSpiller:
         Raises:
             TypeError: If arguments are of incorrect types.
         """
-        if not isinstance(df, _DF_TYPES):
+        if not isinstance(df, _get_spark_df_types()):
             raise TypeError(f"df must be a pyspark.sql.DataFrame, got {type(df).__name__}")
 
         if not isinstance(name, str):
@@ -759,7 +769,7 @@ class VolumeSpiller:
         Returns:
             pl.DataFrame | pl.LazyFrame
         """
-        if not isinstance(df, _DF_TYPES):
+        if not isinstance(df, _get_spark_df_types()):
             raise TypeError(f"Expected a Spark DataFrame, got {type(df).__name__}")
         run_id = uuid.uuid4().hex
         volume_temp_dir = self.get_path(f"spill_sp_pl_{run_id}")

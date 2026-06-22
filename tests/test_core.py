@@ -131,3 +131,9 @@ def test_is_dev_default_arg_uses_resolved_value(spark, monkeypatch):
 
     drop_calls = [str(call) for call in spark.sql.call_args_list if "DROP VOLUME" in str(call)]
     assert drop_calls == [], f"DROP VOLUME was issued despite is_dev=True: {drop_calls}"
+
+
+def test_init_requires_spark_argument():
+    """VolumeSpiller must require an explicit spark argument."""
+    with pytest.raises(ValueError, match="spark must be provided"):
+        VolumeSpiller(spark=None, catalog="c", schema="s", volume_name="v", is_dev=True)

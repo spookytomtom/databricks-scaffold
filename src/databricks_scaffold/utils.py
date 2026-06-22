@@ -1,18 +1,27 @@
+from __future__ import annotations
+
 import contextlib
 import io
 import logging
 import re
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import polars as pl
-from pyspark.sql import DataFrame as SparkDataFrame
-from pyspark.sql import SparkSession
-from pyspark.sql import functions as F
-from pyspark.sql.types import BooleanType, DoubleType, LongType, StringType, StructField, StructType
+
+if TYPE_CHECKING:
+    from pyspark.sql import DataFrame as SparkDataFrame
+    from pyspark.sql import SparkSession
 
 from databricks_scaffold._internal import _get_notebook_var, _resolve_is_dev
 
 _logger = logging.getLogger(__name__)
+
+
+def _spark_df_type():
+    """Lazily import and return pyspark.sql.DataFrame for isinstance checks."""
+    from pyspark.sql import DataFrame as SparkDataFrame
+
+    return SparkDataFrame
 
 
 class DataProfiler:
@@ -49,7 +58,7 @@ class DataProfiler:
         """
         if isinstance(df, pl.DataFrame):
             return self._profile_polars(df, output)
-        elif isinstance(df, SparkDataFrame):
+        elif isinstance(df, _spark_df_type()):
             return self._profile_pyspark(df, output)
         else:
             raise ValueError(f"Unsupported type: {type(df)}. Please pass Polars or PySpark.")
@@ -126,6 +135,8 @@ class DataProfiler:
         total_rows = df.count()
         results = []
 
+        from pyspark.sql import functions as F
+
         if output == "print":
             _logger.info("=== PYSPARK DATAFRAME PROFILE ===")
             _logger.info("Shape: %d rows, %d columns\n%s", total_rows, len(df.columns), "=" * 40)
@@ -168,6 +179,15 @@ class DataProfiler:
                 results.append((col_name, dtype, null_count, float(null_pct), n_unique, is_unique_approx, top_vals_str))
 
         if output == "dataframe":
+            from pyspark.sql.types import (
+                BooleanType,
+                DoubleType,
+                LongType,
+                StringType,
+                StructField,
+                StructType,
+            )
+
             spark = df.sparkSession
             schema = StructType(
                 [
@@ -257,6 +277,8 @@ def keep_duplicates(df: SparkDataFrame, subset: list[str] | str) -> SparkDataFra
     if isinstance(subset, str):
         subset = [subset]
 
+    from pyspark.sql import functions as F
+
     duplicate_keys = df.groupBy(*subset).count().filter(F.col("count") > 1).drop("count")
 
     return df.join(F.broadcast(duplicate_keys), on=subset, how="inner")
@@ -277,6 +299,8 @@ def is_unique(df: SparkDataFrame, column_name: str) -> bool:
     """
     if column_name not in df.columns:
         raise ValueError(f"Column '{column_name}' not found in the DataFrame.")
+
+    from pyspark.sql import functions as F
 
     # Group by the column, count occurrences, and filter for counts > 1.
     # take(1) triggers a short-circuit, making it much faster than a full distinct().count()
