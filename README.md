@@ -381,3 +381,49 @@ try:
 finally:
     spill.teardown()  # volume is dropped, no storage costs left behind
 ```
+
+### Automatic cleanup with `drop_on_error`
+
+Wrapping a whole notebook in `try/finally` is awkward — the block can't span
+cells, and indenting all code under `try:` triggers a persistent linter
+warning. Set `drop_on_error=True` to have `VolumeSpiller` install hooks that
+drop the volume automatically on any uncaught error or at process exit:
+
+```python
+IS_DEV = dbutils.widgets.get("IS_DEV")
+
+from databricks_scaffold import VolumeSpiller
+
+spill = VolumeSpiller(
+    spark=spark,
+    catalog="main",
+    schema="default",
+    volume_name="etl_spill",
+    drop_on_error=True,
+    # volume is auto-dropped on any uncaught cell error or at exit
+    # no try/finally needed
+)
+
+pl_df = spill.spark_to_polars(raw_spark_df, optimize_files=True)
+result = process(pl_df)
+output_spark_df = spill.polars_to_spark(result)
+output_spark_df.write.saveAsTable("main.default.output")
+```
+
+`drop_on_error` works in both dev and prod modes. When set, `teardown()`
+drops the volume regardless of `IS_DEV`. The hooks are:
+
+- **IPython custom exception handler** — fires on any uncaught cell error
+  while the Spark session is still alive, then re-shows the traceback so the
+  cell/job still reports failure.
+- **`atexit` backstop** — drops the volume at clean process/kernel exit.
+
+Both funnel into the existing idempotent `teardown()`, so multiple trigger
+paths are safe.
+
+**Databricks Connect limitation:** On-cluster and under an IPython kernel
+(Jupyter, Databricks notebooks), both hooks fire reliably. Under Databricks
+Connect run as a plain `.py` script (no IPython kernel), only the `atexit`
+backstop fires — and it may fail if the Spark session is already shutting
+down. In that scenario, use a context manager or explicit `try/finally`
+instead.
