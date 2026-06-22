@@ -192,3 +192,33 @@ def test_no_hooks_when_drop_on_error_false(monkeypatch):
     # drop_on_error=False → _install_error_hooks NOT called
     mock_register.assert_not_called()
     mock_shell.set_custom_exc.assert_not_called()
+
+
+def test_handler_idempotent_fired_twice_drops_once(monkeypatch):
+    """Handler invoked twice → teardown runs once (_torn_down guard), showtraceback both times."""
+    mock_register = MagicMock()
+    monkeypatch.setattr(atexit, "register", mock_register)
+
+    mock_shell = MagicMock()
+    monkeypatch.setattr(_core, "get_ipython", lambda: mock_shell)
+
+    mock_spark = MagicMock()
+    spiller = VolumeSpiller(
+        mock_spark, "main", "default", "test_vol",
+        is_dev=False, drop_on_error=True,
+    )
+
+    # Clear construction SQL calls so we can isolate teardown's DROP VOLUME
+    mock_spark.sql.reset_mock()
+
+    handler = mock_shell.set_custom_exc.call_args[0][1]
+
+    handler(mock_shell, ValueError, ValueError("first"), None)
+    handler(mock_shell, ValueError, ValueError("second"), None)
+
+    drop_calls = [
+        c for c in mock_spark.sql.call_args_list
+        if "DROP VOLUME" in str(c)
+    ]
+    assert len(drop_calls) == 1
+    assert mock_shell.showtraceback.call_count == 2
