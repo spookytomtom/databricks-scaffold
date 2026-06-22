@@ -96,3 +96,79 @@ def test_atexit_not_double_registered_when_dev_and_drop_on_error(monkeypatch):
 
     assert mock_register.call_count == 1
     mock_register.assert_called_with(spiller.teardown)
+
+
+def test_ipython_hook_installed_when_available(monkeypatch):
+    """When get_ipython() returns a shell, set_custom_exc is called with (Exception,) and a callable handler."""
+    mock_register = MagicMock()
+    monkeypatch.setattr(atexit, "register", mock_register)
+
+    mock_shell = MagicMock()
+    monkeypatch.setattr(_core, "get_ipython", lambda: mock_shell)
+
+    mock_spark = MagicMock()
+    spiller = VolumeSpiller(
+        mock_spark, "main", "default", "test_vol",
+        is_dev=False, drop_on_error=True,
+    )
+
+    mock_shell.set_custom_exc.assert_called_once()
+    call_args = mock_shell.set_custom_exc.call_args
+    assert call_args[0][0] == (Exception,)
+    handler = call_args[0][1]
+    assert callable(handler)
+
+
+def test_no_ipython_available_no_raise(monkeypatch):
+    """When get_ipython is None (IPython not installed), only atexit registers. No raise."""
+    mock_register = MagicMock()
+    monkeypatch.setattr(atexit, "register", mock_register)
+    monkeypatch.setattr(_core, "get_ipython", None)
+
+    mock_spark = MagicMock()
+    spiller = VolumeSpiller(
+        mock_spark, "main", "default", "test_vol",
+        is_dev=False, drop_on_error=True,
+    )
+
+    mock_register.assert_called_with(spiller.teardown)
+
+
+def test_ipython_returns_none_no_set_custom_exc(monkeypatch):
+    """When get_ipython() returns None (IPython installed, no kernel), no set_custom_exc call."""
+    mock_register = MagicMock()
+    monkeypatch.setattr(atexit, "register", mock_register)
+    monkeypatch.setattr(_core, "get_ipython", lambda: None)
+
+    # get_ipython returns None, so set_custom_exc should never be called
+    # on any shell. We just verify no exception is raised.
+    mock_spark = MagicMock()
+    VolumeSpiller(
+        mock_spark, "main", "default", "test_vol",
+        is_dev=False, drop_on_error=True,
+    )
+
+
+def test_handler_calls_teardown_and_reraises(monkeypatch):
+    """The IPython handler calls teardown() then re-shows the traceback."""
+    mock_register = MagicMock()
+    monkeypatch.setattr(atexit, "register", mock_register)
+
+    mock_shell = MagicMock()
+    monkeypatch.setattr(_core, "get_ipython", lambda: mock_shell)
+
+    mock_spark = MagicMock()
+    spiller = VolumeSpiller(
+        mock_spark, "main", "default", "test_vol",
+        is_dev=False, drop_on_error=True,
+    )
+
+    handler = mock_shell.set_custom_exc.call_args[0][1]
+
+    etype, evalue, tb = ValueError, ValueError("test error"), None
+    handler(mock_shell, etype, evalue, tb)
+
+    assert spiller._torn_down is True
+    mock_shell.showtraceback.assert_called_once_with(
+        (etype, evalue, tb), tb_offset=None
+    )
