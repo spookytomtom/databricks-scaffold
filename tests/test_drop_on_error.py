@@ -172,3 +172,23 @@ def test_handler_calls_teardown_and_reraises(monkeypatch):
     mock_shell.showtraceback.assert_called_once_with(
         (etype, evalue, tb), tb_offset=None
     )
+
+
+def test_no_hooks_when_drop_on_error_false(monkeypatch):
+    """drop_on_error=False → no atexit registration (beyond existing is_dev logic), no set_custom_exc."""
+    mock_register = MagicMock()
+    monkeypatch.setattr(atexit, "register", mock_register)
+
+    mock_shell = MagicMock()
+    monkeypatch.setattr(_core, "get_ipython", lambda: mock_shell)
+
+    mock_spark = MagicMock()
+    VolumeSpiller(
+        mock_spark, "main", "default", "test_vol",
+        is_dev=False, drop_on_error=False,
+    )
+
+    # is_dev=False → existing __init__ does NOT register atexit
+    # drop_on_error=False → _install_error_hooks NOT called
+    mock_register.assert_not_called()
+    mock_shell.set_custom_exc.assert_not_called()
