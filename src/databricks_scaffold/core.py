@@ -748,11 +748,12 @@ class VolumeSpiller:
             self._volume_rmtree(d)
         self._active_volume_dirs.clear()
 
-        if self.is_dev:
+        if self.is_dev and not self._drop_on_error:
             _logger.info("Dev mode: volume data preserved at %s", self.volume_root)
         else:
             self.spark.sql(f"DROP VOLUME IF EXISTS {self.full_name}")
-            _logger.info("Prod mode: volume %s dropped.", self.full_name)
+            _logger.info("Volume %s dropped (is_dev=%s, drop_on_error=%s).",
+                         self.full_name, self.is_dev, self._drop_on_error)
 
     def spark_to_polars(
         self, df: SparkDataFrame, cleanup: bool = False, eager: bool = True, optimize_files: bool = False
