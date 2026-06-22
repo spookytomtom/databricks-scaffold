@@ -185,6 +185,27 @@ class VolumeSpiller:
                     from databricks.sdk import WorkspaceClient
                     wc = WorkspaceClient(profile="my-profile")
                     spill = VolumeSpiller(spark, cat, sch, vol, workspace_client=wc)
+            drop_on_error (bool, optional): If True, installs hooks that
+                automatically drop the volume on any uncaught notebook error
+                (via an IPython custom exception handler) and at process exit
+                (via atexit). Works in both dev and prod modes — when set,
+                teardown() drops the volume regardless of is_dev. Defaults to
+                False (backwards compatible).
+
+                This eliminates the need for try/finally boilerplate in
+                notebooks. Note: under Databricks Connect run as a plain
+                script (no IPython kernel), only the atexit backstop fires,
+                which may be unreliable if the Spark session is already
+                shutting down. In that scenario, use a context manager
+                (with statement) or explicit try/finally instead.
+
+                Example — prod with automatic cleanup::
+
+                    spill = VolumeSpiller(
+                        spark, "main", "default", "etl_spill",
+                        drop_on_error=True,
+                    )
+                    # volume is auto-dropped on any error or at exit
         """
         if spark is None:
             raise ValueError("spark must be provided")
