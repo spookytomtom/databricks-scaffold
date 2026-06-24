@@ -107,7 +107,7 @@ def test_ipython_hook_installed_when_available(monkeypatch):
     monkeypatch.setattr(_core, "get_ipython", lambda: mock_shell)
 
     mock_spark = MagicMock()
-    spiller = VolumeSpiller(
+    VolumeSpiller(
         mock_spark, "main", "default", "test_vol",
         is_dev=False, drop_on_error=True,
     )
@@ -203,7 +203,7 @@ def test_handler_idempotent_fired_twice_drops_once(monkeypatch):
     monkeypatch.setattr(_core, "get_ipython", lambda: mock_shell)
 
     mock_spark = MagicMock()
-    spiller = VolumeSpiller(
+    VolumeSpiller(
         mock_spark, "main", "default", "test_vol",
         is_dev=False, drop_on_error=True,
     )
