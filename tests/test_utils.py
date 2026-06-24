@@ -77,10 +77,12 @@ def test_glimpse(spark, caplog):
 
 def test_data_profiler_polars_prints_summary(caplog):
     caplog.set_level("INFO")
-    df = pl.DataFrame({
-        "id": [1, 2, 3, 4, 5],
-        "region": ["EMEA", "AMER", "EMEA", "APAC", "AMER"],
-    })
+    df = pl.DataFrame(
+        {
+            "id": [1, 2, 3, 4, 5],
+            "region": ["EMEA", "AMER", "EMEA", "APAC", "AMER"],
+        }
+    )
     profiler = DataProfiler(top_n=2)
     result = profiler.profile(df, output="print")
     assert result is None
@@ -90,10 +92,12 @@ def test_data_profiler_polars_prints_summary(caplog):
 
 
 def test_data_profiler_polars_returns_dataframe():
-    df = pl.DataFrame({
-        "id": [1, 2, 3, 4, 5],
-        "region": ["EMEA", "AMER", "EMEA", "APAC", "AMER"],
-    })
+    df = pl.DataFrame(
+        {
+            "id": [1, 2, 3, 4, 5],
+            "region": ["EMEA", "AMER", "EMEA", "APAC", "AMER"],
+        }
+    )
     profiler = DataProfiler(top_n=2)
     result = profiler.profile(df, output="dataframe")
     assert isinstance(result, pl.DataFrame)

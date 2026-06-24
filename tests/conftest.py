@@ -119,6 +119,7 @@ def spark():
     """Return a real SparkSession when standalone pyspark is available, otherwise MagicMock."""
     if _local_spark_available():
         from pyspark.sql import SparkSession
+
         try:
             return SparkSession.builder.getOrCreate()
         except Exception:

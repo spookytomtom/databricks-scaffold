@@ -8,9 +8,7 @@ from databricks_scaffold.core import VolumeSpiller
 def test_drop_on_error_defaults_to_false():
     """The new parameter defaults to False (backwards compatible)."""
     mock_spark = MagicMock()
-    spiller = VolumeSpiller(
-        mock_spark, "main", "default", "test_vol", is_dev=True
-    )
+    spiller = VolumeSpiller(mock_spark, "main", "default", "test_vol", is_dev=True)
     assert spiller._drop_on_error is False
 
 
@@ -18,8 +16,12 @@ def test_drop_on_error_true_is_stored():
     """When drop_on_error=True is passed, the attribute is stored."""
     mock_spark = MagicMock()
     spiller = VolumeSpiller(
-        mock_spark, "main", "default", "test_vol",
-        is_dev=True, drop_on_error=True,
+        mock_spark,
+        "main",
+        "default",
+        "test_vol",
+        is_dev=True,
+        drop_on_error=True,
     )
     assert spiller._drop_on_error is True
 
@@ -31,15 +33,16 @@ def test_teardown_drops_volume_in_dev_with_drop_on_error(monkeypatch):
 
     mock_spark = MagicMock()
     spiller = VolumeSpiller(
-        mock_spark, "main", "default", "test_vol",
-        is_dev=True, drop_on_error=True,
+        mock_spark,
+        "main",
+        "default",
+        "test_vol",
+        is_dev=True,
+        drop_on_error=True,
     )
     spiller.teardown()
 
-    drop_calls = [
-        c for c in mock_spark.sql.call_args_list
-        if "DROP VOLUME" in str(c)
-    ]
+    drop_calls = [c for c in mock_spark.sql.call_args_list if "DROP VOLUME" in str(c)]
     assert len(drop_calls) == 1
 
 
@@ -50,15 +53,16 @@ def test_teardown_preserves_volume_in_dev_without_drop_on_error(monkeypatch):
 
     mock_spark = MagicMock()
     spiller = VolumeSpiller(
-        mock_spark, "main", "default", "test_vol",
-        is_dev=True, drop_on_error=False,
+        mock_spark,
+        "main",
+        "default",
+        "test_vol",
+        is_dev=True,
+        drop_on_error=False,
     )
     spiller.teardown()
 
-    drop_calls = [
-        c for c in mock_spark.sql.call_args_list
-        if "DROP VOLUME" in str(c)
-    ]
+    drop_calls = [c for c in mock_spark.sql.call_args_list if "DROP VOLUME" in str(c)]
     assert len(drop_calls) == 0
 
 
@@ -70,8 +74,12 @@ def test_atexit_registered_when_prod_and_drop_on_error(monkeypatch):
 
     mock_spark = MagicMock()
     spiller = VolumeSpiller(
-        mock_spark, "main", "default", "test_vol",
-        is_dev=False, drop_on_error=True,
+        mock_spark,
+        "main",
+        "default",
+        "test_vol",
+        is_dev=False,
+        drop_on_error=True,
     )
 
     mock_register.assert_called_with(spiller.teardown)
@@ -90,8 +98,12 @@ def test_atexit_not_double_registered_when_dev_and_drop_on_error(monkeypatch):
 
     mock_spark = MagicMock()
     spiller = VolumeSpiller(
-        mock_spark, "main", "default", "test_vol",
-        is_dev=True, drop_on_error=True,
+        mock_spark,
+        "main",
+        "default",
+        "test_vol",
+        is_dev=True,
+        drop_on_error=True,
     )
 
     assert mock_register.call_count == 1
@@ -108,8 +120,12 @@ def test_ipython_hook_installed_when_available(monkeypatch):
 
     mock_spark = MagicMock()
     VolumeSpiller(
-        mock_spark, "main", "default", "test_vol",
-        is_dev=False, drop_on_error=True,
+        mock_spark,
+        "main",
+        "default",
+        "test_vol",
+        is_dev=False,
+        drop_on_error=True,
     )
 
     mock_shell.set_custom_exc.assert_called_once()
@@ -127,8 +143,12 @@ def test_no_ipython_available_no_raise(monkeypatch):
 
     mock_spark = MagicMock()
     spiller = VolumeSpiller(
-        mock_spark, "main", "default", "test_vol",
-        is_dev=False, drop_on_error=True,
+        mock_spark,
+        "main",
+        "default",
+        "test_vol",
+        is_dev=False,
+        drop_on_error=True,
     )
 
     mock_register.assert_called_with(spiller.teardown)
@@ -144,8 +164,12 @@ def test_ipython_returns_none_no_set_custom_exc(monkeypatch):
     # on any shell. We just verify no exception is raised.
     mock_spark = MagicMock()
     VolumeSpiller(
-        mock_spark, "main", "default", "test_vol",
-        is_dev=False, drop_on_error=True,
+        mock_spark,
+        "main",
+        "default",
+        "test_vol",
+        is_dev=False,
+        drop_on_error=True,
     )
 
 
@@ -159,8 +183,12 @@ def test_handler_calls_teardown_and_reraises(monkeypatch):
 
     mock_spark = MagicMock()
     spiller = VolumeSpiller(
-        mock_spark, "main", "default", "test_vol",
-        is_dev=False, drop_on_error=True,
+        mock_spark,
+        "main",
+        "default",
+        "test_vol",
+        is_dev=False,
+        drop_on_error=True,
     )
 
     handler = mock_shell.set_custom_exc.call_args[0][1]
@@ -169,9 +197,7 @@ def test_handler_calls_teardown_and_reraises(monkeypatch):
     handler(mock_shell, etype, evalue, tb)
 
     assert spiller._torn_down is True
-    mock_shell.showtraceback.assert_called_once_with(
-        (etype, evalue, tb), tb_offset=None
-    )
+    mock_shell.showtraceback.assert_called_once_with((etype, evalue, tb), tb_offset=None)
 
 
 def test_no_hooks_when_drop_on_error_false(monkeypatch):
@@ -184,8 +210,12 @@ def test_no_hooks_when_drop_on_error_false(monkeypatch):
 
     mock_spark = MagicMock()
     VolumeSpiller(
-        mock_spark, "main", "default", "test_vol",
-        is_dev=False, drop_on_error=False,
+        mock_spark,
+        "main",
+        "default",
+        "test_vol",
+        is_dev=False,
+        drop_on_error=False,
     )
 
     # is_dev=False → existing __init__ does NOT register atexit
@@ -204,8 +234,12 @@ def test_handler_idempotent_fired_twice_drops_once(monkeypatch):
 
     mock_spark = MagicMock()
     VolumeSpiller(
-        mock_spark, "main", "default", "test_vol",
-        is_dev=False, drop_on_error=True,
+        mock_spark,
+        "main",
+        "default",
+        "test_vol",
+        is_dev=False,
+        drop_on_error=True,
     )
 
     # Clear construction SQL calls so we can isolate teardown's DROP VOLUME
@@ -216,9 +250,6 @@ def test_handler_idempotent_fired_twice_drops_once(monkeypatch):
     handler(mock_shell, ValueError, ValueError("first"), None)
     handler(mock_shell, ValueError, ValueError("second"), None)
 
-    drop_calls = [
-        c for c in mock_spark.sql.call_args_list
-        if "DROP VOLUME" in str(c)
-    ]
+    drop_calls = [c for c in mock_spark.sql.call_args_list if "DROP VOLUME" in str(c)]
     assert len(drop_calls) == 1
     assert mock_shell.showtraceback.call_count == 2

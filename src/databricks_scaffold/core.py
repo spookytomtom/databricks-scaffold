@@ -566,9 +566,7 @@ class VolumeSpiller:
             )
 
         if compression not in {"auto", "zstd", "snappy", "uncompressed"}:
-            raise ValueError(
-                f"Invalid compression '{compression}'. Must be one of: auto, zstd, snappy, uncompressed."
-            )
+            raise ValueError(f"Invalid compression '{compression}'. Must be one of: auto, zstd, snappy, uncompressed.")
 
         base_path, resolved_storage = self._resolve_path(name, storage)
 
@@ -808,8 +806,9 @@ class VolumeSpiller:
             _logger.info("Dev mode: volume data preserved at %s", self.volume_root)
         else:
             self.spark.sql(f"DROP VOLUME IF EXISTS {self.full_name}")
-            _logger.info("Volume %s dropped (is_dev=%s, drop_on_error=%s).",
-                         self.full_name, self.is_dev, self._drop_on_error)
+            _logger.info(
+                "Volume %s dropped (is_dev=%s, drop_on_error=%s).", self.full_name, self.is_dev, self._drop_on_error
+            )
 
     def spark_to_polars(
         self, df: SparkDataFrame, cleanup: bool = False, eager: bool = True, optimize_files: bool = False
