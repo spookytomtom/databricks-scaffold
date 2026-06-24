@@ -65,7 +65,7 @@ The library bridges PySpark and Polars by writing Parquet to Unity Catalog Volum
 
 - **`_internal.py`**: Shared helpers used by both `core.py` and `utils.py`.
   - `_get_notebook_var()`: Reads a variable from the IPython notebook namespace.
-  - `_resolve_is_dev()`: Three-tier resolution — explicit arg → notebook `IS_DEV` → default `True`. Handles Databricks widget strings (`"False"`, `"0"`, etc.).
+  - `_resolve_is_dev()`: Three-tier resolution — explicit arg → notebook `IS_DEV` → default `True`. Recognised falsy strings (case-insensitive): `"false"`, `"f"`, `"0"`, `"no"`, `""`. Any other string is truthy.
 
 - **`core.py` — `VolumeSpiller`**: Central class managing the Parquet spill buffer.
   - `spark_to_polars()` / `polars_to_spark()`: Write Parquet to volume, read back with other engine. Temp dirs tracked in `_active_volume_dirs`, cleaned on `teardown()`. Note: `polars_to_spark()` is volume-only (no `local` option).

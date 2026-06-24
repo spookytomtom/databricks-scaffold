@@ -22,6 +22,9 @@ def _resolve_is_dev(explicit: bool | None) -> bool:
     1. Explicit argument (if not None)
     2. IS_DEV variable from the notebook namespace (handles widget strings)
     3. Default: True (dev mode)
+
+    Recognised falsy strings (case-insensitive, after strip): "false", "f", "0", "no", "".
+    Any other string is treated as truthy.
     """
     if explicit is not None:
         return explicit

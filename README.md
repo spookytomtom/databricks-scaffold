@@ -55,7 +55,7 @@ Volume operations that would otherwise require local `/Volumes/...` filesystem a
 ### `VolumeSpiller`
 Uses a Unity Catalog Volume (or local driver `/tmp`) as a Parquet spill buffer to move data between Spark and Polars without collecting through the driver.
 
-**Constructor:** `VolumeSpiller(spark, catalog, schema, volume_name, is_dev=None, workspace_client=None)`
+**Constructor:** `VolumeSpiller(spark, catalog, schema, volume_name, is_dev=None, workspace_client=None, drop_on_error=False)`
 
 - `workspace_client` — optional pre-constructed `databricks.sdk.WorkspaceClient`. Use this when connecting via Databricks Connect with a non-default profile, custom host, PAT token, or OAuth. If not provided, the SDK's default auth chain is used.
 

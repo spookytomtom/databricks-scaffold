@@ -490,6 +490,12 @@ def display2(df: Any, is_dev: bool | None = None) -> None:
 
     Returns:
         None: This function displays the DataFrame and does not return a value.
+
+    Note:
+        For Polars, pass an eager ``pl.DataFrame`` — not a ``pl.LazyFrame``.
+        ``LazyFrame`` does not have a ``to_pandas()`` method and will not be
+        converted for Databricks ``display()``. Call ``.collect()`` first if
+        you have a LazyFrame.
     """
     # 1. Resolve IS_DEV using shared logic
     is_dev = _resolve_is_dev(is_dev)
