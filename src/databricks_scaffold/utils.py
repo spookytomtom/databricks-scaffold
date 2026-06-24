@@ -92,7 +92,7 @@ class DataProfiler:
             n_unique = df[col_name].n_unique()
             is_unique = n_unique == total_rows
 
-            counts = df[col_name].value_counts().sort("count", descending=True).head(self.top_n)
+            counts = df[col_name].value_counts().top_k(self.top_n, by="count")
             freq_vals = [f"{row[col_name]}: {row['count']}" for row in counts.iter_rows(named=True)]
             top_vals_str = " | ".join(freq_vals)
 
