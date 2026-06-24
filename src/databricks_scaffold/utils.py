@@ -54,8 +54,12 @@ class DataProfiler:
                                                   otherwise None.
 
         Raises:
-            ValueError: If the input DataFrame type is not supported.
+            ValueError: If the input DataFrame type is not supported, or if output
+                        is not 'print' or 'dataframe'.
         """
+        if output not in ("print", "dataframe"):
+            raise ValueError("output must be 'print' or 'dataframe'")
+
         if isinstance(df, pl.DataFrame):
             return self._profile_polars(df, output)
         elif isinstance(df, _spark_df_type()):

@@ -156,3 +156,11 @@ def test_apply_column_comments(spark, caplog):
     apply_column_comments(spark, "test_comments", comments, verbose=True)
     assert "Updating 'id'" in caplog.text
     assert "Skipping 'name': Input comment is empty" in caplog.text
+
+
+def test_data_profiler_invalid_output_raises():
+    """profile() must raise ValueError for unsupported output values."""
+    df = pl.DataFrame({"id": [1, 2, 3]})
+    profiler = DataProfiler()
+    with pytest.raises(ValueError, match="output must be 'print' or 'dataframe'"):
+        profiler.profile(df, output="csv")
