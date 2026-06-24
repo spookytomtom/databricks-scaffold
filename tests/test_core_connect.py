@@ -547,24 +547,24 @@ def test_download_dir_many_files_all_land(spiller_connect, tmp_path):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# I6: _DF_TYPES tuple covers ConnectDataFrame, not just SparkDataFrame
+# I6: _get_spark_df_types() covers ConnectDataFrame, not just SparkDataFrame
 # ──────────────────────────────────────────────────────────────────────────────
 
 
 def test_df_types_includes_connect_dataframe():
-    """_DF_TYPES must contain ConnectDataFrame when pyspark.sql.connect is importable.
+    """_get_spark_df_types() must contain ConnectDataFrame when pyspark.sql.connect is importable.
     If someone removes it from the tuple, this test fails immediately."""
     ConnectDataFrame = pytest.importorskip(
         "pyspark.sql.connect.dataframe",
         reason="pyspark.sql.connect not available",
         exc_type=ImportError,
     ).DataFrame
-    assert ConnectDataFrame in _core._DF_TYPES
+    assert ConnectDataFrame in _core._get_spark_df_types()
 
 
 def test_save_checkpoint_spark_accepts_connect_dataframe(spiller_connect, monkeypatch):
     """A ConnectDataFrame instance must pass the isinstance guard.
-    Existing tests use SparkDataFrame, which matches the first element of _DF_TYPES —
+    Existing tests use SparkDataFrame, which matches the first element of _get_spark_df_types() —
     this test exercises the ConnectDataFrame element specifically."""
     ConnectDataFrame = pytest.importorskip(
         "pyspark.sql.connect.dataframe",
@@ -620,3 +620,13 @@ def test_init_non_connect_error_propagates_unchanged(monkeypatch):
 
     with pytest.raises(ValueError, match="unexpected SQL error"):
         VolumeSpiller(mock_spark, "cat", "sch", "vol", is_dev=True)
+
+
+def test_get_spark_df_types_returns_tuple_with_spark_dataframe():
+    """_get_spark_df_types() always returns a tuple containing at least SparkDataFrame.
+    Runs without pandas — unlike the ConnectDataFrame tests above which skip."""
+    from pyspark.sql import DataFrame as SparkDataFrame
+
+    types = _core._get_spark_df_types()
+    assert isinstance(types, tuple)
+    assert SparkDataFrame in types
